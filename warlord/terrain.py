@@ -1,6 +1,7 @@
 """Terrain and authored overworld layout."""
 
 import math
+import os
 
 import pygame
 
@@ -13,7 +14,11 @@ def ground_y(x):
 
 
 class WorldLayout:
-    """Authored anchors and background scenery for the overworld."""
+    """Authored anchors and the scrolling overworld background."""
+
+    BACKGROUND_PARALLAX = 0.5
+    BACKGROUND_Y = -40
+    BACKGROUND_SIZE = (1800, 600)
 
     def __init__(self):
         self.anchors = {
@@ -27,7 +32,31 @@ class WorldLayout:
         }
         self.tree_positions = (250, 530, 910, 1010, 1460, 1580, 1780, 2180, 2410)
 
+        # The generated panorama is intentionally wider than the viewport.
+        # It moves at half camera speed, so the mountains/settlements scroll
+        # more slowly than gameplay while still covering the full 2600px world.
+        background_path = os.path.join(
+            os.path.dirname(__file__), "assets", "warlord_background.png"
+        )
+        self.background = None
+        if os.path.exists(background_path):
+            try:
+                image = pygame.image.load(background_path).convert()
+                self.background = pygame.transform.smoothscale(image, self.BACKGROUND_SIZE)
+            except pygame.error:
+                self.background = None
+
     def draw_background(self, surf, camera_x):
+        """Draw the authored pixel panorama with horizontal parallax.
+
+        A procedural fallback is kept so the game remains runnable if the
+        optional art asset has not been copied into the repository yet.
+        """
+        if self.background is not None:
+            bg_x = -int(camera_x * self.BACKGROUND_PARALLAX)
+            surf.blit(self.background, (bg_x, self.BACKGROUND_Y))
+            return
+
         mountain_points = [(0, HEIGHT)]
         for screen_x in range(0, WIDTH + 20, 20):
             world_x = camera_x * 0.35 + screen_x * 0.35
