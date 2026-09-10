@@ -1,0 +1,60 @@
+2d Warlord
+
+
+Menu page:
+-start campaign
+-continue campaign
+-quick battle
+-quit game
+-settings
+
+World screen:
+2d like vertical, so like any mario game/ 2d street fighter.
+World will be smooth, not blocky, hills, caves, mountains.
+different layers? like scaling the mountain behind, but also can walk the path in front, and from the mountain you can climb back down.
+water physics? that's hard, but also boats?
+other physical elements such as wind, fire, heat, cold.
+and the world will have fixed elements, physics enabled elements, and hybrids( so that with interaction they become physics)
+
+Trees and vegetation react to the elements, and can be interacted with to harvest wood/herbs or other materials
+Entities: Humans, but also animals, such as cattle, horses, dogs, chicken, pigs, sheep, so basic farm animals.
+Now the style will at first be very very basic, but will then be somewhat pixelated sophisticated.
+
+player as a human will be able to walk, run, crouch, slide, interact with pretty much everything, hold tools/items
+
+now battle mechanics: so 1v1 and army vs army
+
+on a 1v1 it will consist in base attack, that can be combined with the other player states to create special attacks:
+so if it's running it'll be somewhat thrusting powerful, if its standing it will be the base, if it's crouching it'll be a dodgin counter. it brings diversity without adding difficult keys to remember
+then the blocking and parrying, so normal blocking costing stamina/posture metric, then parrying being stamina free and stunning the enemy for a brief moment.
+there will also be projectile weapons, all the classic melee weapons.
+
+the problem here is that since large scale battles mostly scale horizontally,
+but in this 2d world there is no space for that, large scale warfare will be more about
+sieges, warriors holding down gates and passages, and intrusive spyware, assassinations.
+still though on the same level battlefield a maximum of around 20 soldiers will be allowed to fight contemporarly
+through long distance weapons, and melee tactics. (such as refreshing the frontline with rotations)
+or maybe if you can do it, this mechanic could simulate an army holding out a line such as this or at least in a small scale:
+10 soldiers gather to the front, and they perform a line, basically they merge into a grouped entity, that is like a line formation
+and this line formation will have a certain soldier count that will directly affect it's strength. It could withstand blows and enemy advances
+or also be blown from a particularly strong foe.
+
+the army and political side will be organized in a very rigorous ranking system.
+there will always be a leader and subordinate, who the AI or the player will have to direct/respond to
+
+economically there will be farming, fishing, merchant, soldier work, building, and the market prices and supply will all be simulated.
+
+
+
+so anyway for now in 15 hours I want to build this just to prototype:
+Menu with start play:
+then in play we want a player with most of the player states:
+walking, running, crouching, sliding.
+basic fighting mechanics: atk 1 and combos with the player states
+blocking and parrying.
+a sword with the animations
+a basic dummy enemy ai that can fight the player, with the same set of fightin mechanics
+then a cultivating farm so that it makes wheat
+simplest live market form of wheat == money depending on supply.
+a simple wall building to defend, that has a durability stat, and can be attacked/destroyed
+a tent where the player can rest in.
