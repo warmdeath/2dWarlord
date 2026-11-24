@@ -84,7 +84,20 @@ class UI:
 
     def toast(self, line, t=4.0):
         self.toasts.append([line, t])
-        self.toasts = self.toasts[-4:]
+        self.toasts = self.toasts[-3:]
+
+    def new_words(self, words):
+        self.pending_words = getattr(self, "pending_words", []) + list(words)
+
+    def flush_words(self, dt):
+        self.word_t = getattr(self, "word_t", 0.0) - dt
+        pw = getattr(self, "pending_words", [])
+        if pw and self.word_t <= 0:
+            shown = pw[:3]
+            self.pending_words = pw[3:]
+            self.word_t = 2.5
+            label = "Neues Wort" if len(shown) == 1 else "Neue Wörter"
+            self.toast(f"{label}: " + ", ".join(f"[{de}|{en}]" for de, en in shown), 3.5)
 
     def fade(self, line):
         self.fade_t = 2.2
@@ -109,6 +122,7 @@ class UI:
         g = self.g
         p = g.player
         self.fade_t = max(0.0, self.fade_t - dt)
+        self.flush_words(dt)
         for t in self.toasts:
             t[1] -= dt
         self.toasts = [t for t in self.toasts if t[1] > 0]
@@ -228,6 +242,9 @@ class UI:
                     h.selected = (p.selected_haufen == -1 or i == p.selected_haufen)
                 sel = "alle (all)" if p.selected_haufen == -1 else hs[p.selected_haufen].unit.de
                 self.toast(f"[Ausgewählt|selected]: {sel}", 2)
+        elif k == pygame.K_z:
+            g.set_zoom(0.6 if getattr(g, "zoom", 1.0) == 1.0 else 1.0)
+            self.toast("[Feldherrenblick|commander's view] " + ("an (on)" if g.zoom != 1.0 else "aus (off)"), 2)
         elif k == pygame.K_v:
             g.fire_arrows = not g.fire_arrows
             self.toast("[Brandpfeile|fire arrows] " + ("an (on)" if g.fire_arrows else "aus (off)"), 2)
@@ -745,6 +762,8 @@ class UI:
     def ghost_pos(self):
         g = self.g
         mx, my = pygame.mouse.get_pos()
+        z = getattr(g, "zoom", 1.0)
+        mx, my = mx / z, my / z
         ox, oy = g.camera.offset()
         tx = int((mx + ox) // TILE) - self.build_sel.width // 2
         ty = int((my + oy) // TILE)
@@ -859,7 +878,8 @@ class UI:
             text(surf, f"{td.de} ({td.en})", (r.centerx, r.y - 18), 12, center=True)
         if self.modal is None and self.build_sel is None:
             mx, my = pygame.mouse.get_pos()
-            wx, wy = mx + ox, my + oy
+            z = getattr(g, "zoom", 1.0)
+            wx, wy = mx / z + ox, my / z + oy
             tx, ty = int(wx // TILE), int(wy // TILE)
             if math.hypot(wx - p.cx, wy - p.cy) < 5.5 * TILE and g.world.inside(tx, ty):
                 tid = int(g.world.fg[tx, ty])
@@ -1415,7 +1435,7 @@ class UI:
             ("1-0 / wheel", "hotbar · Q = drop · T = cycle shield/armour/helmet from your bag"),
             ("I", "inventory & crafting (stand near Werkbank / Amboss / Ofen / Webstuhl)"),
             ("B", "blueprints: huts, walls, gates, towers, chapels, halls, castles"),
-            ("C / Tab", "orders bar for your Haufen (formations) · Tab = select formation"),
+            ("C / Tab / Z", "orders bar for your Haufen · Tab = select formation · Z = commander's zoomed-out view"),
             ("M", "world map, politics, fast travel by cart"),
             ("N", "Wörterbuch — every German word you've heard · Q = quiz"),
             ("R", "Ständeordnung — the social ladder and how to climb it"),

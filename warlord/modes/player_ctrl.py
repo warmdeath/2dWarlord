@@ -25,7 +25,8 @@ class PlayerController:
         it = p.intent
         it.clear()
         ox, oy = g.camera.offset()
-        mx, my = mouse_pos
+        z = getattr(g, "zoom", 1.0)
+        mx, my = mouse_pos[0] / z, mouse_pos[1] / z
         wx, wy = mx + ox, my + oy
         self.mouse_world = (wx, wy)
         self.place_cd = max(0.0, self.place_cd - dt)

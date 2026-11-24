@@ -333,6 +333,15 @@ def tile_surface(tid, var, mask):
     return s
 
 
+def branch_surface(var):
+    key = ("branch", var)
+    s = _cache.get(key)
+    if s is None:
+        s = pygame.transform.rotate(tile_surface(T.LOG.id, var, 0), 90)
+        _cache[key] = s
+    return s
+
+
 def grass_cap(tid, var):
     key = (tid, var)
     s = _cap_cache.get(key)

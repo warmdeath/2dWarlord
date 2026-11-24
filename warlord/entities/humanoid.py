@@ -485,7 +485,7 @@ class Humanoid(Body):
         # landing damage
         if self.on_ground and self.landed_speed > 0:
             fall = (self.y - self.fall_peak) / TILE
-            if fall > 9 and self.in_water < 0.2:
+            if fall > 9 and self.in_water < 0.2 and not getattr(self, "skyfall", False):
                 dmg = (fall - 9) * 7
                 self.hp -= dmg
                 self.hurt_flash = 0.2

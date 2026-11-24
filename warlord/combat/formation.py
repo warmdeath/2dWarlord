@@ -76,6 +76,7 @@ class Haufen:
         self.selected = False
         self.flank_t = 0.0
         self.y_cache = {}
+        self.base_row = None
         self.last_casualty = 0.0
         self.recent_losses = 0
         self.follow_target = None
@@ -106,15 +107,33 @@ class Haufen:
         return (min(a, b), max(a, b))
 
     def ground(self, px):
-        tx = int(px // TILE)
-        g = self.y_cache.get(tx)
+        """Ground under column px at *our* level: we can climb a few tiles, but never onto a wall-top arch."""
+        w = self.game.world
+        tx = max(0, min(w.w - 1, int(px // TILE)))
+        if self.base_row is None:
+            ref = int(w.surface[tx]) - 30
+            self.base_row = w.ground_at(tx, max(0, ref))
+        key = (tx, self.base_row)
+        g = self.y_cache.get(key)
         if g is None:
-            ref = int(self.game.world.surface[max(0, min(self.game.world.w - 1, tx))]) - 30
-            g = self.game.world.ground_at(tx, max(0, ref)) * TILE
-            self.y_cache[tx] = g
-            if len(self.y_cache) > 400:
+            row = w.ground_at(tx, max(0, self.base_row - 3))
+            if row < self.base_row - 2 or (row > 0 and T.SOLID[w.fg[tx, row - 1]]):
+                row = self.base_row          # a wall column: stand at our own level
+            g = row * TILE
+            self.y_cache[key] = g
+            if len(self.y_cache) > 600:
                 self.y_cache.clear()
         return g
+
+    def track_ground(self):
+        w = self.game.world
+        tx = max(0, min(w.w - 1, int(self.x // TILE)))
+        if self.base_row is None:
+            self.ground(self.x)
+        nb = w.ground_at(tx, max(0, self.base_row - 3))
+        # only follow walkable ground: a step of up to 2 tiles with headroom, or any drop
+        if nb < w.h and (nb >= self.base_row - 2) and not T.SOLID[w.fg[tx, nb - 1]]:
+            self.base_row = nb
 
     def contains(self, px, py):
         a, b = self.span()
@@ -248,6 +267,7 @@ class Haufen:
                 if not f.dead and f.hp < 30 and f.stagger <= 0 and random.random() < dt * 1.5:
                     self._retire_front(f)
                     self.spawn_delay = 0.2
+        self.track_ground()
         enemy, dist = self.nearest_enemy()
         self.target = enemy
         # morale
@@ -326,6 +346,17 @@ class Haufen:
         # contact stops movement
         if self.contact is not None and want > 0 and self.order != "flucht":
             want = 0.0
+        # don't march through friendly formations: queue up behind them
+        if want > 0 and self.order not in ("flucht",):
+            for f in g.formations:
+                if f is self or f.dead or f.side != self.side or f.facing != self.facing:
+                    continue
+                fa, fb = f.span()
+                back = fa if self.facing > 0 else fb
+                gap = (back - self.x) * self.facing
+                if -10 < gap < 24 and (f.center()[0] - self.center()[0]) * self.facing > 0:
+                    want = min(want, max(0.0, f.speed))
+                    break
         # cavalry charge gets the full gallop only after a run-up
         if self.unit.cavalry and self.order == "angriff":
             self.speed += (want - self.speed) * min(1.0, dt * 1.2)
@@ -358,7 +389,7 @@ class Haufen:
             self.blocked_by_tile = blocked_tile
             self.speed = 0
             # siege: the front ranks hack at the gate / wall in their way
-            if self.order in ("vorwaerts", "angriff") and self.front:
+            if self.order == "angriff" and self.front:
                 tid = int(w.fg[blocked_tile])
                 if T.TILES[tid].hardness < 999:
                     power = 0.9 * len([f for f in self.front if not f.dead]) * (1.6 if tid in (T.GATE.id,

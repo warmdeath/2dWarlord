@@ -284,6 +284,25 @@ class Society:
                         m.job = "ruler"
                         m.rank = kd["ruler_rank"]
                         self.rulers[kd["key"]] = m.id
+            if kd["key"] not in self.rulers:
+                # e.g. the prince-bishop: he holds court in his biggest church
+                sis = [si for si, s in enumerate(self.world.settlements) if s["kingdom"] == kd["key"]]
+                if not sis:
+                    continue
+                order = {"capital": 0, "city": 1, "town": 2, "castle": 3, "monastery": 4}
+                si = min(sis, key=lambda i: order.get(self.world.settlements[i]["type"], 9))
+                s = self.world.settlements[si]
+                ch = next((b for b in s["buildings"] if b["kind"] in ("church", "hall", "townhall")), None)
+                x = (ch["work"] * TILE + 40) if ch else (s["x0"] + s["x1"]) / 2 * TILE
+                clergy = kd["realm"] == "Fürstbistum"
+                look = make_look(self.rng, kd["ruler_rank"], "bishop" if clergy else "ruler", clergy=clergy,
+                                 kingdom_colors=kd["colors"])
+                rp = self._new_person(name=kd["ruler"], job="ruler", rank=kd["ruler_rank"], kingdom=kd["key"],
+                                      settlement=si, home_x=x, work_x=x, g=s["g"], look=look, fighter=not clergy,
+                                      noble=True, clergy=clergy, gear=("fists", "", "kleidung", ""),
+                                      title=kd["ruler"].split()[0], seat=s["name"])
+                self.rulers[kd["key"]] = rp.id
+                self.lords[si] = rp.id
 
     # ------------------------------------------------------------------ politics
     def at_war(self, a, b=None):

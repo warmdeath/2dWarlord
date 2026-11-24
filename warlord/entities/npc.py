@@ -147,8 +147,17 @@ class CombatBrain(Brain):
             mv = ta["move"]
             if ta["t"] < mv.windup and (t.facing * -d) > 0:
                 threat = True
-        if threat and random.random() < h.skill * 0.9 + 0.05:
-            self.block_hold = 0.35 + random.uniform(0, 0.2)
+        # humans need time to react: skilled fighters see the blow coming sooner
+        if threat and self.block_hold <= 0:
+            if getattr(self, "react", None) is None:
+                self.react = 0.24 - h.skill * 0.16 + random.uniform(0, 0.08)
+            self.react -= dt
+            if self.react <= 0:
+                self.react = None
+                if random.random() < h.skill * 0.8 + 0.05:
+                    self.block_hold = 0.3 + random.uniform(0, 0.25)
+        elif not threat:
+            self.react = None
         if self.block_hold > 0:
             self.block_hold -= dt
             it.block = True

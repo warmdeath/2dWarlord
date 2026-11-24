@@ -44,6 +44,13 @@ class CombatSystem:
             tr = (t.x, t.y, t.w, t.h)
             if not _rect_overlap(r, tr):
                 continue
+            # a crouching fighter ducks under horizontal cuts
+            if mv.arc in ("swing", "backswing") and getattr(t, "h", 0) == 28 and getattr(t, "kind", "") == "human" \
+                    and att.mount is None:
+                if t.uid not in att.hit_ids:
+                    g.fx.text(t.cx, t.y - 10, "Geduckt!", (200, 220, 255), gloss="ducked")
+                att.hit_ids.add(t.uid)
+                continue
             att.hit_ids.add(t.uid)
             dmg = wd.dmg * mv.dmg * att.strength
             if mv is wd.moves.get("run") and att.mount is None:
@@ -53,6 +60,8 @@ class CombatSystem:
                 dmg *= 1.0 + speed / (90.0 if "lance" in wd.flags else 220.0)
             if "pike" in wd.flags and abs(t.cx - att.cx) < 30 and att.formation is None:
                 dmg *= 0.45  # an enemy inside your pike's reach
+            if t is g.player and att is not g.player:
+                dmg *= 0.72   # the hero's edge: NPC blows hurt a little less
             flags = wd.flags
             if mv.arc == "plunge":
                 flags = flags + ("unblockable",) if t.y > att.y + 10 else flags

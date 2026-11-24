@@ -126,7 +126,10 @@ class Body:
             g *= (self.weight - 0.98 * self.in_water * 1.0)
             self.vy *= (1.0 - min(0.9, 3.5 * dt * self.in_water))
             self.vx *= (1.0 - min(0.9, 2.0 * dt * self.in_water))
-        self.vy = min(self.vy + g * dt, self.max_fall if self.in_water < 0.3 else 220)
+        cap = self.max_fall if self.in_water < 0.3 else 220
+        if getattr(self, "skyfall", False):
+            cap = 520   # the void lets go of you gently
+        self.vy = min(self.vy + g * dt, cap)
         if self.drop_through > 0:
             self.drop_through -= dt
         was_ground = self.on_ground

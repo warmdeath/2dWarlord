@@ -28,20 +28,21 @@ class Camera:
         self.shake = 0.0
         self.zoom = 1.0
 
-    def follow(self, tx, ty, dt, world, lead=0.0):
-        gx = tx - SCREEN_W / 2 + lead
-        gy = ty - SCREEN_H * 0.58
+    def follow(self, tx, ty, dt, world, lead=0.0, view=(SCREEN_W, SCREEN_H)):
+        SW, SH = view
+        gx = tx - SW / 2 + lead
+        gy = ty - SH * 0.58
         k = min(1.0, dt * 6.0)
         self.x += (gx - self.x) * k
         self.y += (gy - self.y) * k
-        self.y = max(-200, min(world.pixel_h() - SCREEN_H + 120, self.y))
-        self.x = max(-SCREEN_W * 0.5, min(world.pixel_w() - SCREEN_W * 0.5, self.x))
+        self.y = max(-200, min(world.pixel_h() - SH + 120, self.y))
+        self.x = max(-SW * 0.5, min(world.pixel_w() - SW * 0.5, self.x))
         if self.shake > 0:
             self.shake = max(0.0, self.shake - dt * 20)
 
-    def snap(self, tx, ty):
-        self.x = tx - SCREEN_W / 2
-        self.y = ty - SCREEN_H * 0.58
+    def snap(self, tx, ty, view=(SCREEN_W, SCREEN_H)):
+        self.x = tx - view[0] / 2
+        self.y = ty - view[1] * 0.58
 
     def offset(self):
         if self.shake > 0:
@@ -62,6 +63,7 @@ class Renderer:
         self.clouds = [[random.uniform(0, 4000), random.uniform(20, 240), random.uniform(80, 220),
                         random.uniform(0.6, 1.0)] for _ in range(14)]
         self.light_cache = None
+        self.storm = 0.0
 
     # ------------------------------------------------------------------ chunk caches
     def invalidate(self):
@@ -118,6 +120,9 @@ class Renderer:
             if t.deco or t.style in ("vine", "sapling"):
                 img = tileart.tile_surface(tid, var, 0)
                 blit(img, (px, py + TILE - img.get_height()))
+                continue
+            if tid == T.LOG.id and fgp[lx + 1, ly] != tid and fgp[lx + 1, ly + 2] != tid:
+                blit(tileart.branch_surface(var), (px, py))   # a horizontal limb, not a trunk
                 continue
             m = int(mask[lx, ly]) if t.natural else 0
             blit(tileart.tile_surface(tid, var, m), (px, py))
@@ -189,10 +194,19 @@ class Renderer:
         self.treeline = smooth_array(np.array([trees.get(b, 0.0) for b in biome], dtype=np.float32), 31)
         self.volcanic = smooth_array(np.array([1.0 if b in ("volcanic", "lavasea") else 0.0 for b in biome],
                                               dtype=np.float32), 61)
-        ab = (w.abyss_w + 6) // 8
-        self.far[:ab] = -3000
-        self.mid[:ab] = -3000
-        self.treeline[:ab] = 0
+        ab = max(0, (w.abyss_w + 6) // 8)
+        if ab > 0:
+            # distant land sinks away into the abyss instead of ending in a wall
+            ramp_n = 90
+            ramp = np.clip((np.arange(n) - ab) / ramp_n, 0.0, 1.0) ** 0.7
+            self.far = self.far * ramp - (1 - ramp) * 420
+            self.mid = self.mid * ramp - (1 - ramp) * 420
+            self.treeline = self.treeline * ramp
+        # the same at the burning east end
+        le = (w.w - w.lava_w) // 8
+        if 0 < le < n:
+            ramp = np.clip((le + 40 - np.arange(n)) / 60.0, 0.0, 1.0)
+            self.mid = self.mid * ramp - (1 - ramp) * 300
         self.snowy = smooth_array(np.array([1.0 if b in ("snow", "mountains") else 0.0 for b in biome],
                                            dtype=np.float32), 61)
 
@@ -222,13 +236,14 @@ class Renderer:
         return top, bot
 
     def draw_sky(self, surf, env, cam):
+        SW, SH = surf.get_size()
         top, bot = self.sky_colors(env)
-        key = (top, bot)
+        key = (top, bot, SW, SH)
         if self.light_cache is None or self.light_cache[0] != key:
             g = pygame.Surface((1, 64))
             for i in range(64):
                 g.set_at((0, i), lerp_col(top, bot, i / 63))
-            self.light_cache = (key, pygame.transform.smoothscale(g, (SCREEN_W, SCREEN_H)))
+            self.light_cache = (key, pygame.transform.smoothscale(g, (SW, SH)))
         surf.blit(self.light_cache[1], (0, 0))
         sun = env.sun_height()
         # stars
@@ -237,20 +252,20 @@ class Renderer:
             for sx, sy, tw in self.stars:
                 b = int(160 * a * (0.6 + 0.4 * math.sin(env.time * 2 + tw * 20)))
                 if b > 10:
-                    surf.set_at((int(sx * SCREEN_W), int(sy * SCREEN_H)), (b, b, min(255, b + 30)))
+                    surf.set_at((int(sx * SW), int(sy * SH)), (b, b, min(255, b + 30)))
         # sun & moon on an arc
         ang = env.day_fraction() * math.tau - math.pi / 2
-        cx, cy = SCREEN_W / 2, SCREEN_H * 0.95
-        rx, ry = SCREEN_W * 0.48, SCREEN_H * 0.85
+        cx, cy = SW / 2, SH * 0.95
+        rx, ry = SW * 0.48, SH * 0.85
         sx, sy = cx - math.cos(ang) * rx, cy - math.sin(ang) * ry
-        if sy < SCREEN_H:
+        if sy < SH:
             glow = pygame.Surface((160, 160), pygame.SRCALPHA)
             for r in range(70, 10, -10):
                 pygame.draw.circle(glow, (255, 230, 170, 12), (80, 80), r)
             surf.blit(glow, (sx - 80, sy - 80))
             pygame.draw.circle(surf, (255, 238, 190), (int(sx), int(sy)), 18)
         mx, my = cx + math.cos(ang) * rx, cy + math.sin(ang) * ry
-        if my < SCREEN_H:
+        if my < SH:
             pygame.draw.circle(surf, (226, 226, 236), (int(mx), int(my)), 13)
             pygame.draw.circle(surf, top, (int(mx) + 5, int(my) - 3), 11)
         # clouds
@@ -260,7 +275,7 @@ class Renderer:
         for c in self.clouds:
             c[0] += env.wind * 18 * env.dt_hint
             x = (c[0] - cam.x * 0.05) % 4200 - 400
-            if x > SCREEN_W + 300:
+            if x > SW + 300:
                 continue
             n = 1 + int(cover * 5)
             for k in range(n):
@@ -268,26 +283,27 @@ class Renderer:
                 pygame.draw.ellipse(surf, ccol, (x + k * c[2] * 0.33, c[1] + (k % 2) * 10 - r * 0.3, r * 1.6, r * 0.7))
 
     def draw_parallax(self, surf, env, cam):
+        SW, SH = surf.get_size()
         top, bot = self.sky_colors(env)
         sun = env.sun_height()
         night = max(0.0, min(1.0, -sun * 3 + 0.3)) if sun < 0.1 else 0.0
-        horizon = SCREEN_H * 0.62 - (cam.y - (SEA_LEVEL * TILE - SCREEN_H * 0.6)) * 0.12
+        horizon = SH * 0.50 - (cam.y - (SEA_LEVEL * TILE - SH * 0.6)) * 0.08
         layers = [
             (0.12, self.far, lerp_col(bot, (70, 80, 110), 0.45), 0.0, 1.0),
-            (0.30, self.mid, lerp_col(bot, (46, 60, 70), 0.65), 60, 0.8),
+            (0.30, self.mid, lerp_col(bot, (46, 60, 70), 0.65), 22, 0.8),
         ]
         for f, prof, col, yoff, hscale in layers:
             col = lerp_col(col, (14, 16, 26), night * 0.85)
-            pts = [(0, SCREEN_H)]
+            pts = [(0, SH)]
             step = 8
             base_y = horizon + yoff + (cam.y - SEA_LEVEL * TILE) * (0.05 * f)
-            for sx in range(0, SCREEN_W + step, step):
-                wx = (cam.x + SCREEN_W / 2 + (sx - SCREEN_W / 2) / f) / TILE / 8
+            for sx in range(0, SW + step, step):
+                wx = (cam.x + SW / 2 + (sx - SW / 2) / f) / TILE / 8
                 i = int(max(0, min(len(prof) - 2, wx)))
                 fr = wx - int(wx)
                 h = prof[i] * (1 - fr) + prof[i + 1] * fr
                 pts.append((sx, float(base_y - h * hscale)))
-            pts.append((SCREEN_W, SCREEN_H))
+            pts.append((SW, SH))
             pygame.draw.polygon(surf, col, pts)
             if f == 0.12:
                 # snow caps & volcano glow on the far range
@@ -295,7 +311,7 @@ class Renderer:
                 for k in range(1, len(pts) - 2):
                     sx, sy = pts[k]
                     sx2, sy2 = pts[k + 1]
-                    i = int(max(0, min(len(prof) - 1, (cam.x + SCREEN_W / 2 + (sx - SCREEN_W / 2) / f) / TILE / 8)))
+                    i = int(max(0, min(len(prof) - 1, (cam.x + SW / 2 + (sx - SW / 2) / f) / TILE / 8)))
                     hgt = base_y - sy
                     if self.snowy[i] > 0.5 and hgt > 150:
                         d = min(22, (hgt - 150) * 0.4 + 4)
@@ -308,9 +324,9 @@ class Renderer:
             if s["type"] not in ("castle", "capital", "city", "robber", "town", "monastery"):
                 continue
             wxp = (s["x0"] + s["x1"]) / 2 * TILE
-            sx = SCREEN_W / 2 + (wxp - cam.x - SCREEN_W / 2) * f
-            if -200 < sx < SCREEN_W + 200 and abs(wxp - cam.x - SCREEN_W / 2) > SCREEN_W * 0.6:
-                base_y = horizon + 60 + (cam.y - SEA_LEVEL * TILE) * (0.05 * f)
+            sx = SW / 2 + (wxp - cam.x - SW / 2) * f
+            if -200 < sx < SW + 200 and abs(wxp - cam.x - SW / 2) > SW * 0.6:
+                base_y = horizon + 22 + (cam.y - SEA_LEVEL * TILE) * (0.05 * f)
                 i = int(max(0, min(len(self.mid) - 1, s["x0"] / 8)))
                 by = base_y - self.mid[i] * 0.8
                 c = lerp_col(lerp_col(bot, (40, 52, 62), 0.7), (14, 16, 26), night * 0.85)
@@ -318,19 +334,19 @@ class Renderer:
         # near treeline
         f = 0.5
         col = lerp_col(lerp_col(bot, (30, 46, 44), 0.8), (10, 12, 20), night * 0.85)
-        base_y = horizon + 130 + (cam.y - SEA_LEVEL * TILE) * 0.08
-        band = [(-40, SCREEN_H)]
-        for sx in range(-40, SCREEN_W + 60, 20):
-            i = int(max(0, min(len(self.treeline) - 1, (cam.x + SCREEN_W / 2 + (sx - SCREEN_W / 2) / f) / TILE / 8)))
+        base_y = horizon + 44 + (cam.y - SEA_LEVEL * TILE) * 0.03
+        band = [(-40, SH)]
+        for sx in range(-40, SW + 60, 20):
+            i = int(max(0, min(len(self.treeline) - 1, (cam.x + SW / 2 + (sx - SW / 2) / f) / TILE / 8)))
             band.append((sx, base_y - 4 if self.treeline[i] > 0.08 else base_y + 400))
-        band.append((SCREEN_W + 60, SCREEN_H))
+        band.append((SW + 60, SH))
         pygame.draw.polygon(surf, col, band)
-        shift = (cam.x + SCREEN_W / 2) * f - SCREEN_W / 2
-        for k in range(int((shift - 40) // 22), int((shift + SCREEN_W + 40) // 22) + 1):
+        shift = (cam.x + SW / 2) * f - SW / 2
+        for k in range(int((shift - 40) // 22), int((shift + SW + 40) // 22) + 1):
             sxx = k * 22 - shift
             wx = (k * 22 / f) / TILE / 8
             i = int(max(0, min(len(self.treeline) - 1, wx)))
-            if self.treeline[i] < ((k * 2654435761) % 100) / 100.0:
+            if self.treeline[i] < 0.08 or self.treeline[i] < ((k * 2654435761) % 100) / 100.0:
                 continue
             hh = 40 + (k * 7919) % 50
             if (k * 31) % 3 == 0:
@@ -358,19 +374,21 @@ class Renderer:
 
     # ------------------------------------------------------------------ world layers
     def draw_terrain(self, surf, cam):
+        SW, SH = surf.get_size()
         self.invalidate()
         ox, oy = cam.offset()
         cx0, cy0 = ox // CPX, oy // CPX
-        cx1, cy1 = (ox + SCREEN_W) // CPX, (oy + SCREEN_H) // CPX
+        cx1, cy1 = (ox + SW) // CPX, (oy + SH) // CPX
         for cy in range(cy0, cy1 + 1):
             for cx in range(cx0, cx1 + 1):
                 t, _ = self.get_chunk(cx, cy)
                 surf.blit(t, (cx * CPX - ox, cy * CPX - oy))
 
     def draw_liquids(self, surf, cam, time):
+        SW, SH = surf.get_size()
         ox, oy = cam.offset()
         cx0, cy0 = ox // CPX, oy // CPX
-        cx1, cy1 = (ox + SCREEN_W) // CPX, (oy + SCREEN_H) // CPX
+        cx1, cy1 = (ox + SW) // CPX, (oy + SH) // CPX
         for cy in range(cy0, cy1 + 1):
             for cx in range(cx0, cx1 + 1):
                 _, l = self.get_chunk(cx, cy)
@@ -379,9 +397,9 @@ class Renderer:
         # animated surface highlights
         w = self.world
         tx0 = max(0, ox // TILE)
-        tx1 = min(w.w, (ox + SCREEN_W) // TILE + 1)
+        tx1 = min(w.w, (ox + SW) // TILE + 1)
         ty0 = max(1, oy // TILE)
-        ty1 = min(w.h, (oy + SCREEN_H) // TILE + 1)
+        ty1 = min(w.h, (oy + SH) // TILE + 1)
         if tx1 <= tx0 or ty1 <= ty0:
             return
         liq = w.liq[tx0:tx1, ty0 - 1:ty1]
@@ -392,7 +410,8 @@ class Renderer:
             amt = int(w.liq[x, y])
             py = y * TILE + TILE - amt * TILE // 8 - oy
             px = x * TILE - ox
-            wave = math.sin(time * 2.2 + x * 0.55) * 1.5
+            wave = math.sin(time * 2.2 + x * 0.55) * (1.5 + 5 * self.storm) + \
+                math.sin(time * 1.3 + x * 0.17) * 6 * self.storm
             if w.lava[x, y]:
                 pygame.draw.line(surf, (255, 200, 90), (px, py + wave), (px + TILE, py - wave), 2)
             else:
@@ -400,13 +419,14 @@ class Renderer:
 
     # ------------------------------------------------------------------ lighting
     def draw_lighting(self, surf, cam, env, dyn_lights):
+        SW, SH = surf.get_size()
         w = self.world
         ox, oy = cam.offset()
         m = 10
         tx0 = ox // TILE - m
         ty0 = oy // TILE - m
-        tw = SCREEN_W // TILE + 2 * m + 2
-        th = SCREEN_H // TILE + 2 * m + 2
+        tw = SW // TILE + 2 * m + 2
+        th = SH // TILE + 2 * m + 2
         fg = np.zeros((tw, th), dtype=np.uint8)
         bg = np.zeros((tw, th), dtype=np.uint8)
         liq = np.zeros((tw, th), dtype=np.uint8)

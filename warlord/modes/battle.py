@@ -18,7 +18,7 @@ from ..society.kingdoms import BY_KEY
 from ..ui.common import text, panel, bilingual
 
 SCENARIOS = {
-    "ford": dict(de="Die Furt", en="The Ford", biome="plains", enemy="glutmark",
+    "ford": dict(de="Die Furt", en="The Ford", biome="forest", enemy="glutmark",
                  mine=[("speer", 30), ("schild", 22), ("bogen", 24)],
                  theirs=[("bauern", 40), ("speer", 34), ("schild", 26), ("bogen", 26), ("reisige", 10)],
                  intro=["Markgraf Otto's host must cross the [Furt|ford] to reach Heiligenstein.",
@@ -30,7 +30,7 @@ SCENARIOS = {
                  intro=["A stone [Tor|gate] closes the only pass through the mountains.",
                         "Few against many: they must hack through the gate before they can fight you.",
                         "Rotate your front rank with [Wechsel|switch] so fresh men always hold the breach."]),
-    "field": dict(de="Offene Feldschlacht", en="Open Battle", biome="plains", enemy="waldheim",
+    "field": dict(de="Offene Feldschlacht", en="Open Battle", biome="hills", enemy="waldheim",
                   mine=[("spiess", 40), ("schild", 24), ("bogen", 26), ("ritter", 10)],
                   theirs=[("ritter", 14), ("reisige", 12), ("speer", 34), ("bogen", 30), ("schild", 20)],
                   intro=["Duke Eberhard's [Ritter|knights] will charge. Their charge breaks anything —",
@@ -40,7 +40,8 @@ SCENARIOS = {
                   mine=[("schild", 30), ("speer", 28), ("armbrust", 20), ("bauern", 30)],
                   theirs=[("bogen", 18), ("schild", 22), ("raeuber", 30)],
                   intro=["The [Raubritter|robber knight] Kuno sits in his [Burg|castle] at Schwarzfels.",
-                         "Your men must hack down the [Tor|gate] — or dig under the wall until it collapses.",
+                         "Order [Angriff|charge] and your men hack down the [Tor|gate] — or dig under the wall "
+                         "until it collapses.",
                          "Raise [Schilde|shields] against the archers on the battlements."]),
 }
 

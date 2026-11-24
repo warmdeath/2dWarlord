@@ -268,8 +268,8 @@ def generate(width=48000, seed=1300, out=None):
             w.bg[x, bottom:] = 0
             w.liq[x, bottom:] = 0
     # jagged lip
-    for x in range(aw, aw + 6):
-        top = surface[x] + rng.randint(0, 6)
+    for i, x in enumerate(range(aw, aw + 6)):
+        top = surface[x] + (6 - i) + rng.randint(0, 1)   # the brink slopes down into the void
         w.fg[x, :top] = 0
     # east end: the lava pours over the brink
     le = width - 40
@@ -413,13 +413,16 @@ def grow_tree(w, x, g, kind, rng):
         h = rng.randint(4, 8)
         for y in range(g - h, g):
             w.fg[x, y] = T.LOG.id
-        for k in range(2):
-            by = g - h + rng.randint(0, h // 2)
-            d = rng.choice((-1, 1))
-            for i in range(1, rng.randint(2, 4)):
+        for k, d in enumerate((-1, 1)):
+            by = g - h + 1 + rng.randint(0, max(1, h // 2))
+            length = rng.randint(2, 3)
+            for i in range(1, length + 1):
                 xx = x + d * i
-                if 0 <= xx < w.w and w.fg[xx, by - i // 2] == 0:
-                    w.fg[xx, by - i // 2] = T.LOG.id
+                if 0 <= xx < w.w and w.fg[xx, by] == 0:
+                    w.fg[xx, by] = T.LOG.id
+            tip = x + d * (length + 1)
+            if 0 <= tip < w.w and w.fg[tip, by - 1] == 0:
+                w.fg[tip, by - 1] = T.LOG.id      # the limb turns upward at its end
 
 
 def build_settlement(w, p, rng):

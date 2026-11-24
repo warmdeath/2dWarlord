@@ -153,10 +153,10 @@ class WorldSim:
             t += step
             tid = int(w.fg[x, y])
             if not T.FLAMMABLE[tid] or w.liq[x, y] > 2:
-                del w.fires[(x, y)]
+                w.fires.pop((x, y), None)
                 continue
             if self.rng.random() < rain * 0.06 * step * 4:
-                del w.fires[(x, y)]
+                w.fires.pop((x, y), None)
                 continue
             w.fires[(x, y)] = t
             for dx, dy in ((1, 0), (-1, 0), (0, -1), (0, 1), (1, -1), (-1, -1)):
@@ -164,14 +164,14 @@ class WorldSim:
                 if not w.inside(nx, ny) or (nx, ny) in w.fires:
                     continue
                 if T.FLAMMABLE[w.fg[nx, ny]]:
-                    p = 0.06 * step * 4 * (1.0 + (wind * dx) * 1.5) * (1.0 - rain * 0.8)
+                    p = 0.13 * step * 4 * max(0.2, 1.0 + (wind * dx) * 1.5) * (1.0 - rain * 0.8)
                     if dy < 0:
                         p *= 1.6  # flames climb
                     if self.rng.random() < p:
                         new.append((nx, ny))
-            burn = 4.0 if tid in (T.LEAVES.id, T.PINE.id, T.THATCH.id, T.HAY.id, T.TALLGRASS.id) else 9.0
+            burn = 6.0 if tid in (T.LEAVES.id, T.PINE.id, T.THATCH.id, T.HAY.id, T.TALLGRASS.id) else 11.0
             if t > burn:
-                del w.fires[(x, y)]
+                w.fires.pop((x, y), None)
                 g.break_tile(x, y, drop=False, by=None)
         for c in new:
             w.fires[c] = 0.0

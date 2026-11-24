@@ -127,6 +127,8 @@ class Session:
         self.tick = 0
         self.battle = None
         self.game_over = False
+        self.zoom = 1.0
+        self._view = None
         # player
         self.player = Player(0, 0, self.rng, rank=player_rank)
         self.player.inv.money = 25
@@ -141,7 +143,7 @@ class Session:
     # ================================================================== persistence
     def __getstate__(self):
         d = self.__dict__.copy()
-        for k in ("app", "renderer", "ui", "audio"):
+        for k in ("app", "renderer", "ui", "audio", "_view"):
             d[k] = None
         return d
 
@@ -343,7 +345,7 @@ class Session:
                 w.set(x, yy, 0)
             if drop and td.drop:
                 self.drop_item(td.drop, 1, x * TILE + 8, y * TILE + 8)
-            self.sim.check_support(x, y)
+            self.sim.check_support(x, min(ys))
             return
         w.set(x, y, 0)
         w.fires.pop((x, y), None)
@@ -652,8 +654,7 @@ class Session:
     def hear(self, line, ctx="", toast=True):
         new = self.player.dict.learn(line, ctx)
         if new and toast:
-            for de, en in new[:2]:
-                self.ui.toast(f"Neues Wort: [{de}|{en}]")
+            self.ui.new_words(new)
         self.player.stats["words"] = len(self.player.dict.words)
 
     def greeting_category(self):
@@ -746,6 +747,15 @@ class Session:
             self.audio.play(name)
 
     # ================================================================== LOD: people & animals
+    def free_column(self, tx, g, direction=1, limit=40):
+        """Nearest column to tx whose 3 tiles above row g are open (not inside a wall or tower)."""
+        w = self.world
+        for d in range(limit):
+            for x in (tx + d * direction, tx - d * direction):
+                if 0 <= x < w.w and not any(T.SOLID[w.fg[x, g - k]] for k in (1, 2, 3)):
+                    return x
+        return tx
+
     def materialize(self, si):
         s = self.world.settlements[si]
         env_h = self.env.hour()
@@ -756,7 +766,8 @@ class Session:
                 continue
             x = (p.bed_x * TILE + 8 if night and p.bed_x else p.home_x) if night else p.work_x
             x += self.rng.uniform(-20, 20)
-            tx = int(x // TILE)
+            tx = self.free_column(int(x // TILE), p.g)
+            x = tx * TILE + 8
             g = p.g if T.SOLID[self.world.fg[tx, p.g]] or T.PLATFORM_T[self.world.fg[tx, p.g]] else \
                 self.world.ground_at(tx, max(0, p.g - 3))
             h = Humanoid(x - 7, g * TILE - 43, p.look, p.kingdom, p.name, p.rank)
@@ -787,10 +798,12 @@ class Session:
                 a.home_x = x
                 self.animals.append(a)
         if s["type"] in ("castle", "capital"):
+            hall = next((b for b in s["buildings"] if b["kind"] == "hall"), None)
+            hx = (hall["x0"] - 3) if hall else s["x0"] + 20
             for i in range(2):
-                x = (s["x0"] + 12 + i * 4) * TILE
-                g = self.world.ground_at(int(x // TILE), max(0, s["g"] - 3))
-                a = self.spawn_horse(x, g * TILE, wild=False)
+                tx = self.free_column(hx - i * 3, s["g"], direction=-1)
+                x = tx * TILE + 8
+                a = self.spawn_horse(x, s["g"] * TILE, wild=False)
                 a.settlement = si
                 a.tethered = True
                 a.for_sale = True
@@ -953,6 +966,9 @@ class Session:
                 hf.order = "vorwaerts"
             return
         u = hf.unit
+        if hf.blocked_by_tile is not None and not u.ranged:
+            hf.order = "angriff"     # storm the gate / wall in the way
+            return
         if u.ranged:
             hf.order = "halt" if dist < 700 else "vorwaerts"
             if dist < 160 and enemy.unit.cavalry:
@@ -1135,7 +1151,19 @@ class Session:
         lead = p.vx * 0.35 if p.mount is None else p.mount.vx * 0.6
         if p.boat is not None:
             lead = p.boat.vx * 0.8
-        self.camera.follow(p.cx, p.cy, dt, self.world, lead=lead)
+        self.camera.follow(p.cx, p.cy, dt, self.world, lead=lead, view=self.view_size())
+
+    def view_size(self):
+        z = getattr(self, "zoom", 1.0)
+        return (int(SCREEN_W / z), int(SCREEN_H / z))
+
+    def set_zoom(self, z):
+        p = self.player
+        old = self.view_size()
+        self.zoom = z
+        new = self.view_size()
+        self.camera.x += (old[0] - new[0]) / 2
+        self.camera.y += (old[1] - new[1]) * 0.58
 
     def update_player_needs(self, dt):
         p = self.player
@@ -1488,7 +1516,19 @@ class Session:
         self.ui.toast(f"You wake, robbed of {lost} [Pfennig|pennies]. [Gott sei Dank|thank God] you live.")
 
     # ================================================================== drawing
-    def draw(self, surf):
+    def draw(self, screen):
+        z = getattr(self, "zoom", 1.0)
+        if z != 1.0:
+            size = self.view_size()
+            if self._view is None or self._view.get_size() != size:
+                self._view = pygame.Surface(size).convert()
+            self.draw_world(self._view)
+            pygame.transform.smoothscale(self._view, screen.get_size(), screen)
+        else:
+            self.draw_world(screen)
+        self.ui.draw(screen)
+
+    def draw_world(self, surf):
         r = self.renderer
         cam = self.camera
         ox, oy = cam.offset()
@@ -1520,6 +1560,7 @@ class Session:
             fb.draw(surf, ox, oy)
         for pr in self.projectiles:
             pr.draw(surf, ox, oy)
+        r.storm = env.rain() if env.current()[0] in ("sturm", "regen") else 0.0
         r.draw_liquids(surf, cam, env.time)
         self.draw_fires_front(surf, ox, oy)
         self.fx.draw(surf, ox, oy, self.ui.small, self.ui.tiny)
@@ -1536,7 +1577,6 @@ class Session:
         r.draw_lighting(surf, cam, env, lights)
         self.draw_weather(surf, ox, oy)
         self.ui.draw_world_overlays(surf, ox, oy)
-        self.ui.draw(surf)
 
     def draw_scaffold(self, surf, c, ox, oy):
         for x, y, f, b in c.jobs[c.i:c.i + 400:3]:

@@ -435,8 +435,8 @@ class Story:
                 hf.no_advance = True
                 s.formations.append(hf)
             s.society.wanted.discard("bandit")
-            s.ui.toast("Schwarzfels. Order your men forward (C). Hack down the [Tor|gate] or dig under the "
-                       "wall.", 8)
+            s.ui.toast("Schwarzfels. Press C and order [Angriff|charge] to hack down the [Tor|gate] — or dig "
+                       "under the wall.", 8)
         elif a == "knighting":
             p.rank = max(p.rank, 4)
             p.liege = "randmark"
