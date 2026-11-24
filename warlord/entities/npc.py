@@ -32,8 +32,16 @@ def walk_to(h, game, tx_px, run=False, tol=6):
         if w.inside(fx, ty) and w.fg[fx, ty] == T.GATE.id and game.can_open_gate(h, fx, ty):
             game.open_gate(fx, ty)
     if h.blocked and h.on_ground:
-        it.jump = True
-        it.jump_held = True
+        # only jump over obstacles we can actually clear (1-2 tiles with headroom), never up a wall
+        feet_row = int((h.feet - 1) // TILE)
+        height = 0
+        while height < 4 and w.inside(fx, feet_row - height) and T.SOLID[w.fg[fx, feet_row - height]]:
+            height += 1
+        headroom = all(not (w.inside(fx, feet_row - k) and T.SOLID[w.fg[fx, feet_row - k]])
+                       for k in range(height, height + 3))
+        if 0 < height <= 2 and headroom:
+            it.jump = True
+            it.jump_held = True
     if h.in_water > 0.3:
         it.jump_held = True
     return False

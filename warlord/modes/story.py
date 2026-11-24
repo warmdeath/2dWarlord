@@ -354,7 +354,7 @@ class Story:
             s.formations.append(hf)
             self.raid = [hf]
             for i in range(8):
-                h = self.spawn_npc(f"bauer{i}", f"Bauer", p.cx - 40 - i * 18, rank=0, job="farmer",
+                h = self.spawn_npc(f"bauer{i}", "Bauer", p.cx - 40 - i * 18, rank=0, job="farmer",
                                    gear=(["flegel", "mistgabel", "knueppel", "axt"][i % 4], "", "kleidung", ""),
                                    faction="player", brain="follow")
                 h.follow_idx = i

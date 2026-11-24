@@ -1,6 +1,7 @@
 """World renderer: cached terrain/liquid chunks, painterly parallax sky, soft tile lighting."""
 import math
 import random
+from collections import OrderedDict
 
 import numpy as np
 import pygame
@@ -54,10 +55,9 @@ class Camera:
 class Renderer:
     def __init__(self, world):
         self.world = world
-        self.terrain = {}
+        self.terrain = OrderedDict()   # LRU: most recently used at the end
         self.liquid = {}
-        self.order = []
-        self.max_chunks = 90
+        self.max_chunks = 120
         self._build_parallax()
         self.stars = [(random.random(), random.random() * 0.6, random.random()) for _ in range(140)]
         self.clouds = [[random.uniform(0, 4000), random.uniform(20, 240), random.uniform(80, 220),
@@ -77,9 +77,8 @@ class Renderer:
         w.liquid_dirty.clear()
 
     def _evict(self):
-        while len(self.order) > self.max_chunks:
-            c = self.order.pop(0)
-            self.terrain.pop(c, None)
+        while len(self.terrain) > self.max_chunks:
+            c, _ = self.terrain.popitem(last=False)
             self.liquid.pop(c, None)
 
     def _render_terrain(self, cx, cy):
@@ -167,10 +166,10 @@ class Renderer:
         if t is None:
             t = self._render_terrain(cx, cy)
             self.terrain[key] = t
-            self.liquid[key] = self._render_liquid(cx, cy)
-            self.order.append(key)
             self._evict()
-        elif key not in self.liquid:
+        else:
+            self.terrain.move_to_end(key)
+        if key not in self.liquid:
             self.liquid[key] = self._render_liquid(cx, cy)
         return t, self.liquid.get(key)
 

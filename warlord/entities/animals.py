@@ -90,9 +90,7 @@ class Animal(Body):
             self.physics(game.world, dt)
             return
         if self.rider is not None:
-            self.physics(game.world, dt)
-            self.walk_phase += abs(self.vx) * dt * 0.06
-            return
+            return   # the rider's update drives the horse (ride_control); don't integrate twice
         if self.species == "fish":
             self._fish(game, dt)
             return

@@ -386,17 +386,23 @@ def generate(width=48000, seed=1300, out=None):
 
 def grow_tree(w, x, g, kind, rng):
     if kind == "oak":
-        h = rng.randint(6, 11)
+        h = rng.randint(4, 7)
         for y in range(g - h, g):
             w.fg[x, y] = T.LOG.id
-        cy = g - h
-        r = rng.randint(3, 4)
-        for dx in range(-r, r + 1):
-            for dy in range(-r, r // 2 + 1):
-                if dx * dx + dy * dy * 1.6 <= r * r + rng.random() * 2:
+        r = rng.randint(3, 5)
+        cy = g - h - r // 2
+        rx, ry = r + 0.6, r * 0.85
+        for dx in range(-r - 1, r + 2):
+            for dy in range(-r, r + 1):
+                d = (dx / rx) ** 2 + (dy / ry) ** 2
+                if d <= 1.0 + rng.uniform(-0.15, 0.1):
                     xx, yy = x + dx, cy + dy
                     if 0 <= xx < w.w and 0 <= yy < w.h and w.fg[xx, yy] == 0:
                         w.fg[xx, yy] = T.LEAVES.id
+        # a trunk that reaches into the crown
+        for y in range(cy, g - h):
+            if 0 <= y < w.h:
+                w.fg[x, y] = T.LOG.id
     elif kind == "pine":
         h = rng.randint(9, 15)
         for y in range(g - h, g):

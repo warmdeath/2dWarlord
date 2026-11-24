@@ -673,11 +673,11 @@ class Session:
         self.hear(line, "msg", toast=False)
 
     # ================================================================== events
-    def emit(self, name, **kw):
+    def emit(self, event, **kw):
         if self.story is not None:
-            self.story.on_event(name, kw)
+            self.story.on_event(event, kw)
         if self.battle is not None:
-            self.battle.on_event(name, kw)
+            self.battle.on_event(event, kw)
 
     def on_death(self, h, killer):
         p = getattr(h, "person", None)
@@ -1639,4 +1639,5 @@ class Session:
                 while yy < y - oy:
                     yy += rng.randint(30, 70)
                     pts.append((x - ox + rng.randint(-25, 25), min(yy, y - oy)))
-                pygame.draw.lines(surf, (255, 255, 240), False, pts, 3)
+                if len(pts) >= 2:
+                    pygame.draw.lines(surf, (255, 255, 240), False, pts, 3)
