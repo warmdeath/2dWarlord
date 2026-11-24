@@ -53,7 +53,13 @@ The difference isn't only in the amount of code. It's in the order the work was 
      attrition fixed that;
    - the background mountains sitting below the ground line, and a negative-index bug that erased the battle
      arenas' backgrounds;
-   - the player taking ordinary fall damage on top of the sky-drop damage after falling through the Abyss.
+   - the player taking ordinary fall damage on top of the sky-drop damage after falling through the Abyss;
+   - a chunk-cache eviction bug that re-rendered about 8 screen chunks every frame in busy towns (27 ms → 11 ms
+     per frame once fixed), found by a day-long soak test in the capital;
+   - ridden horses being simulated twice per frame, which would have made the "one-hour ride" about 45 minutes;
+   - guards hopping up the floors of a keep whenever a wall blocked them, then walking off the top;
+   - formations walking over a breached gate's arch instead of through the opening;
+   - an event-name clash that would have crashed story chapter IV the moment your watchtower was finished.
 
 ## Honest limitations, and what I'd do next
 
@@ -65,8 +71,8 @@ The difference isn't only in the amount of code. It's in the order the work was 
   `combat/weapons.py`, `combat/units.py` and `combat/formation.py`.
 - **Distant armies** are abstract until they get close. Siege ladders and battering rams as separate units would
   be the next step for sieges.
-- **Performance** is about 8–10 ms per frame normally and about 16 ms in the zoomed battle view on the test
-  machine. Python sets a ceiling: thousands of individually simulated fighters would need numpy-batched AI or a
+- **Performance** is about 8–11 ms per frame normally (including a capital with 55 people) and about 16 ms in
+  the zoomed battle view on the test machine. Python sets a ceiling: thousands of individually simulated fighters would need numpy-batched AI or a
   compiled core.
 - The **story** is complete and playable end to end, but its longer journeys use cut-scene travel, and its
   dialogue is linear rather than branching.
