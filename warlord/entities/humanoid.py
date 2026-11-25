@@ -8,7 +8,11 @@ import math
 
 from ..settings import (TILE, WALK_SPEED, RUN_SPEED, CROUCH_SPEED, SWIM_SPEED, JUMP_SPEED, CLIMB_SPEED)
 from ..combat.weapons import WEAPONS, SHIELDS, ARMORS, HELMETS
-from ..gfx.rig import compute_pose
+import random
+
+from ..gfx.rig import compute_pose, blend_pose, apply_body_state, world_joints
+from .ragdoll import Ragdoll
+from ..combat import injury as INJ
 from .body import Body
 
 PARRY_WINDOW = 0.18
@@ -97,6 +101,12 @@ class Humanoid(Body):
         self.carry_light = 0.0
         self.kills = 0
         self.morale = 1.0
+        self.land_t = 0.0
+        self.injury = {}         # part -> wound level 1..3
+        self.wounds = {}         # part -> accumulated wound damage
+        self.bandaged = False
+        self.ragdoll = None
+        self.trail = None
 
     # ---------------------------------------------------------------- equipment
     def equip(self, weapon=None, shield=None, armor=None, helmet=None):
@@ -163,7 +173,8 @@ class Humanoid(Body):
         self.stamina -= wd.stamina * mv.stamina * (0.6 if self.mount else 1.0)
         self.blocking = False
 
-    def take_hit(self, game, attacker, dmg, dtype, posture, flags=(), high=True, source_x=None, arrow=False):
+    def take_hit(self, game, attacker, dmg, dtype, posture, flags=(), high=True, source_x=None, arrow=False,
+                 hit_y=None, pen=None):
         """Returns 'parry', 'block', 'hit' or 'immune'."""
         if self.dead or self.invuln > 0:
             return "immune"
@@ -204,20 +215,21 @@ class Humanoid(Body):
             result = "block"
         else:
             result = "hit"
-        # armour
-        a = self.armor
-        red = {"cut": a.cut, "pierce": a.pierce, "blunt": a.blunt}.get(dtype, 0.0)
-        if high and self.helmet:
-            red += HELMETS[self.helmet][0]
-        if "armorbreak" in flags:
-            red *= 0.4
-        if "armorpierce" in flags:
-            red *= 0.5
-        dmg *= (1.0 - min(0.9, red))
+        # armour: where did it land, and does the edge get through?
+        part = INJ.hit_part(self, hit_y, high)
+        if pen is None:
+            pen = {"cut": 3, "pierce": 4, "blunt": 1}.get(dtype, 3)
+        frac, hard = INJ.armour(self, part, dtype, pen, flags)
+        dmg *= frac
+        if hard and frac < 0.2 and dtype != "blunt":
+            game.fx.sparks(self.cx, (hit_y or self.y + 16), 8)
+            game.fx.text(self.cx, self.y - 14, "Abgeprallt!", (210, 220, 240), gloss="glanced off", life=0.9)
+            game.sfx("block")
         if "backstab" in flags and not facing_source and self.aware <= 4.0 and getattr(self, "unaware", False):
             dmg *= 3
             game.fx.text(self.cx, self.y - 22, "Meuchelstoß!", (230, 60, 60), gloss="assassination")
         self.hp -= dmg
+        INJ.wound(self, part, dmg, game)
         self.hurt_flash = 0.15
         self.posture -= posture * 0.5
         kb = 60 + dmg * 5
@@ -253,6 +265,12 @@ class Humanoid(Body):
             game.dismount(self)
         if killer is not None:
             killer.kills += 1
+        # the skeleton that animated us becomes a physical ragdoll
+        try:
+            spin = (self.vx * 0.6) if abs(self.vx) > 40 else random.uniform(-60, 60)
+            self.ragdoll = Ragdoll(world_joints(self), (self.vx * 0.8, min(self.vy, 0) - 80), spin)
+        except Exception:
+            self.ragdoll = None
         game.on_death(self, killer)
 
     # ---------------------------------------------------------------- main update
@@ -261,7 +279,7 @@ class Humanoid(Body):
         self.anim_t += dt
         it = self.intent
         for attr in ("stagger", "hurt_flash", "invuln", "combo_window", "riposte_ready", "aware", "coyote",
-                     "jump_buffer"):
+                     "jump_buffer", "land_t"):
             v = getattr(self, attr)
             if v > 0:
                 setattr(self, attr, max(0.0, v - dt))
@@ -271,12 +289,21 @@ class Humanoid(Body):
                 self.bubble = None
         if self.dead:
             self.dead_t += dt
+            rd = getattr(self, "ragdoll", None)
+            if rd is not None:
+                rd.update(world, dt)
+                hx, hy = rd.anchor()
+                self.x, self.y = hx - self.w / 2, hy - self.h * 0.6
+                return
             self.vx *= 0.9
             self.physics(world, dt)
             self.pose = compute_pose(self)
             return
         if self.mount is not None:
             self._update_mounted(game, dt)
+            return
+        INJ.tick(self, dt, game)
+        if self.dead:
             return
         # regen
         if self.action is None and not self.blocking:
@@ -312,7 +339,7 @@ class Humanoid(Body):
         crouched = self.h == CROUCH_H
         # --- horizontal movement
         sp = WALK_SPEED
-        if it.run and not crouched and self.stamina > 5:
+        if it.run and not crouched and self.stamina > 5 and INJ.can_run(self):
             sp = RUN_SPEED
         if crouched:
             sp = CROUCH_SPEED
@@ -324,7 +351,7 @@ class Humanoid(Body):
             sp *= 0.25
         if self.action is not None and self.action["kind"] in ("bow", "crossbow"):
             sp *= 0.5
-        sp *= self.speed_mult() * (0.0 if self.stagger > 0 else 1.0)
+        sp *= self.speed_mult() * INJ.speed_factor(self) * (0.0 if self.stagger > 0 else 1.0)
         if self.slide_t > 0:
             self.slide_t -= dt
             self.vx *= (1 - 1.2 * dt)
@@ -377,7 +404,7 @@ class Humanoid(Body):
                 self.vy += 400 * dt
             if self.in_water < 0.7 and it.jump and self.vy > -50:
                 self.vy = -JUMP_SPEED * 0.75   # leap out of the water
-        elif self.jump_buffer > 0 and self.coyote > 0 and not crouched and self.stagger <= 0:
+        elif self.jump_buffer > 0 and self.coyote > 0 and not crouched and self.stagger <= 0 and INJ.can_jump(self):
             self.vy = -JUMP_SPEED * (0.9 if self.weight > 1.3 else 1.0)
             self.on_ground = False
             self.coyote = 0
@@ -404,7 +431,9 @@ class Humanoid(Body):
         self.physics(world, dt)
         self._environment(game, dt)
         self._classify(dt)
-        self.pose = compute_pose(self)
+        self._pose(dt)
+        if self.state == "run" and self.on_ground and random.random() < dt * 5:
+            game.fx.dust(self.cx - self.facing * 4, self.feet, 1, (150, 130, 100))
 
     def _advance_attack(self, game, dt):
         a = self.action
@@ -479,11 +508,20 @@ class Humanoid(Body):
             self._update_bow(game, dt)
         self.blocking = it.block and self.weapon_def.kind == "melee"
         self.state = "ride"
-        self.pose = compute_pose(self)
+        self._pose(dt)
+
+    def _pose(self, dt):
+        target = apply_body_state(compute_pose(self), self)
+        attacking = self.action is not None and self.action.get("kind") in ("attack", "block")
+        k = 1.0 - math.exp(-(42.0 if attacking else 16.0) * dt)
+        self.pose = blend_pose(self.pose, target, k)
 
     def _environment(self, game, dt):
         # landing damage
         if self.on_ground and self.landed_speed > 0:
+            if self.landed_speed > 380:
+                self.land_t = 0.18
+                game.fx.dust(self.cx, self.feet, int(self.landed_speed / 120), (150, 130, 100))
             fall = (self.y - self.fall_peak) / TILE
             if fall > 9 and self.in_water < 0.2 and not getattr(self, "skyfall", False):
                 dmg = (fall - 9) * 7

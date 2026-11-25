@@ -171,12 +171,12 @@ class Session:
     def give_start_kit(self, kind="sandbox"):
         inv = self.player.inv
         if kind == "story":
-            for k, n in (("sichel", 1), ("bread", 3), ("seeds", 10)):
+            for k, n in (("sichel", 1), ("bread", 3), ("seeds", 10), ("verband", 2)):
                 inv.add(k, n)
             self.player.equip(weapon="fists")
             return
         for k, n in (("schwert", 1), ("spitzhacke", 1), ("axt", 1), ("bogen", 1), ("arrow", 40), ("torch", 10),
-                     ("bread", 6), ("planks", 60), ("seeds", 10), ("holzschild", 1)):
+                     ("bread", 6), ("planks", 60), ("seeds", 10), ("holzschild", 1), ("verband", 4)):
             inv.add(k, n)
         inv.selected = 0
         self.player.equip(weapon="schwert", shield="holzschild", armor="gambeson")
@@ -559,6 +559,20 @@ class Session:
         self.sfx("eat")
         self.sync_held()
 
+    def bandage(self, h):
+        from ..combat import injury as INJ
+        inv = getattr(h, "inv", None)
+        if not h.injury:
+            self.ui.toast("You have no [Wunden|wounds] to bind.", 2)
+            return False
+        if inv is not None and not inv.remove("verband", 1):
+            self.ui.toast("No [Verband|bandage]! (craft one from [Tuch|cloth])", 2)
+            return False
+        INJ.bandage(h)
+        self.fx.text(h.cx, h.y - 16, "Verbunden", (230, 230, 210), gloss="bandaged")
+        self.sync_held()
+        return True
+
     def sync_held(self):
         p = self.player
         held = p.inv.held()
@@ -734,9 +748,26 @@ class Session:
         self.emit("rout", hf=hf)
 
     def add_corpse_sprite(self, hf, x, y):
-        self.corpses.append([x, y, hf.protos[0], hf.facing, 0.0])
-        if len(self.corpses) > 160:
-            self.corpses.pop(0)
+        """A soldier falls out of a formation's ranks: he becomes a real ragdoll body."""
+        from ..entities.ragdoll import Ragdoll
+        from ..gfx.rig import world_joints
+        proto = hf.protos[self.rng.randrange(len(hf.protos))]
+        h = Humanoid(x - 7, y - 43, dict(proto.look), hf.side, hf.unit.de)
+        h.equip(weapon=proto.weapon_key, shield=hf.unit.shield or "", armor=hf.unit.armor,
+                helmet=hf.unit.helmet or "")
+        h.facing = hf.facing
+        h.dead = True
+        h.state = "dead"
+        h.hp = 0
+        h.brain = None
+        h.weapon_drawn = True
+        h.ragdoll = Ragdoll(world_joints(h), (-hf.facing * self.rng.uniform(50, 170), -self.rng.uniform(60, 220)),
+                            self.rng.uniform(-80, 80))
+        self.humanoids.insert(0, h)
+        self.corpse_bodies = getattr(self, "corpse_bodies", [])
+        self.corpse_bodies.append(h)
+        if len(self.corpse_bodies) > 60:
+            self.corpse_bodies.pop(0).removed = True
         self.fx.blood(x, y - 20, 5, -hf.facing)
 
     def hitstop(self, t):
@@ -1490,6 +1521,8 @@ class Session:
         add = ((24 - h) + 6) if h > 6 else (6 - h)
         self.env.time += add / 24 * DAY_LENGTH
         self.player.hp = self.player.max_hp
+        from ..combat import injury as INJ
+        INJ.rest(self.player, 8)
         self.player.spawn_x = self.player.cx
         self.ui.fade("[Gute Nacht|good night]… [Guten Morgen|good morning]!")
         self.renderer.light_cache = None
@@ -1498,6 +1531,10 @@ class Session:
         p = self.player
         p.dead = False
         p.hp = p.max_hp * 0.6
+        p.injury.clear()
+        p.wounds.clear()
+        p.ragdoll = None
+        p.pose.rot = 0.0
         p.state = "idle"
         p.hunger = max(p.hunger, 40)
         lost = p.inv.money // 3

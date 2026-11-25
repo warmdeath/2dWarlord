@@ -102,6 +102,10 @@ class PlayerController:
             if self.place_cd <= 0 and g.try_place(p, held, tx, ty):
                 self.place_cd = 0.12
             return
+        if hd is not None and hd.cat == "heal" and clicked and self.eat_cd <= 0:
+            g.bandage(p)
+            self.eat_cd = 0.6
+            return
         if hd is not None and hd.cat == "food" and clicked and self.eat_cd <= 0:
             g.eat(p, held)
             self.eat_cd = 0.4

@@ -87,6 +87,7 @@ for key, tile, val in (("workbench", T.WORKBENCH, 8), ("anvil", T.ANVIL, 40), ("
 _i("arrow", "Pfeil", "arrow", "ammo", 1, color=(200, 190, 170), icon="arrow")
 _i("bolt", "Bolzen", "crossbow bolt", "ammo", 2, color=(170, 170, 176), icon="arrow")
 _i("fire_arrow", "Brandpfeil", "fire arrow", "ammo", 3, color=(255, 140, 40), icon="arrow")
+_i("verband", "Verband", "bandage", "heal", 3, color=(236, 230, 214), icon="lump")
 _i("chronik", "Chronik", "the Frostholm chronicle", "misc", 0, stack=1, color=(120, 40, 40), icon="block")
 # boats and mounts (deeds)
 _i("boat", "Boot", "boat", "mount", 120, stack=1, color=(140, 100, 60), icon="boat")

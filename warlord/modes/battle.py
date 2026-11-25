@@ -232,7 +232,7 @@ def build_battle(app, kind):
     p.look["tabard"] = ((40, 70, 140), (236, 232, 222))
     p.look["trim"] = (214, 178, 74)
     for k, n in (("schwert", 1), ("bogen", 1), ("arrow", 40), ("spitzhacke", 1), ("bread", 5), ("armbrust", 1),
-                 ("bolt", 20)):
+                 ("bolt", 20), ("verband", 5)):
         p.inv.add(k, n)
     p.equip(weapon="schwert", shield="dreieckschild", armor="kettenhemd", helmet="topfhelm")
     p.max_hp = p.hp = 160

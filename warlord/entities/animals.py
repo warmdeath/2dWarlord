@@ -60,7 +60,8 @@ class Animal(Body):
             self.weight = 0.0
         self.burning = 0.0
 
-    def take_hit(self, game, attacker, dmg, dtype, posture, flags=(), high=True, source_x=None, arrow=False):
+    def take_hit(self, game, attacker, dmg, dtype, posture, flags=(), high=True, source_x=None, arrow=False,
+                 **kw):
         if self.dead:
             return "immune"
         self.hp -= dmg
@@ -115,7 +116,7 @@ class Animal(Body):
             if abs(d) < self.w * 0.5 + 16 and abs(enemy.cy - self.cy) < 40 and self.attack_cd <= 0:
                 self.attack_cd = 1.1
                 dmg = {"wolf": 9, "bear": 24, "boar": 14}.get(self.species, 6)
-                enemy.take_hit(game, self, dmg, "cut", 12, high=False)
+                enemy.take_hit(game, self, dmg, "cut", 12, high=False, pen=3)
                 if self.on_ground:
                     self.vy = -200
         elif self.flee_t > 0 and pl is not None:

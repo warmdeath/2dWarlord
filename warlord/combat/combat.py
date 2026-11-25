@@ -1,7 +1,10 @@
 """Melee and missile resolution, bracing against charges."""
 import math
 
+import random
+
 from ..settings import TILE, RUN_SPEED
+from . import injury as INJ
 
 
 def _rect_overlap(a, b):
@@ -52,7 +55,7 @@ class CombatSystem:
                 att.hit_ids.add(t.uid)
                 continue
             att.hit_ids.add(t.uid)
-            dmg = wd.dmg * mv.dmg * att.strength
+            dmg = wd.dmg * mv.dmg * att.strength * INJ.damage_factor(att)
             if mv is wd.moves.get("run") and att.mount is None:
                 dmg *= 1.0 + min(1.0, abs(att.vx) / RUN_SPEED) * 0.25
             if att.mount is not None:
@@ -67,7 +70,14 @@ class CombatSystem:
                 flags = flags + ("unblockable",) if t.y > att.y + 10 else flags
             high = mv.arc in ("swing", "backswing", "overhead", "plunge")
             if hasattr(t, "take_hit"):
-                res = t.take_hit(g, att, dmg, wd.dtype, wd.posture * mv.posture, flags, high=high)
+                if mv.arc == "overhead" or mv.arc == "plunge":
+                    hy = t.y + t.h * random.uniform(0.0, 0.45)
+                elif mv.arc == "low":
+                    hy = t.y + t.h * random.uniform(0.55, 0.95)
+                else:
+                    hy = max(t.y, min(t.y + t.h - 1, r[1] + r[3] * random.uniform(0.2, 0.85)))
+                res = t.take_hit(g, att, dmg, wd.dtype, wd.posture * mv.posture, flags, high=high, hit_y=hy,
+                                 pen=INJ.PEN.get(wd.key, 3) + (1 if att.mount is not None else 0))
                 if res in ("hit", "block"):
                     g.hitstop(0.035 if res == "hit" else 0.02)
                     if res == "hit":
@@ -129,8 +139,9 @@ class CombatSystem:
                 high = p.y < t.y + 12
                 flags = ("armorpierce",) if p.kind == "bolt" else ()
                 if hasattr(t, "take_hit"):
-                    res = t.take_hit(g, p.owner, dmg, "pierce", 6, flags, high=high, source_x=p.x - p.vx * 0.05,
-                                     arrow=True)
+                    pen = INJ.PEN.get(p.kind, 5) * min(1.2, speed / 700.0)
+                    res = t.take_hit(g, p.owner, dmg, "pierce" if p.kind != "ball" else "blunt", 6, flags, high=high,
+                                     source_x=p.x - p.vx * 0.05, arrow=True, hit_y=p.y, pen=pen)
                     if res == "block":
                         g.fx.text(t.cx, t.y - 8, "Tock!", (220, 200, 160))
                 if p.fire and hasattr(t, "burning"):

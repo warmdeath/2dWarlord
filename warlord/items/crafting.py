@@ -22,6 +22,8 @@ STATION_TILES = {
 
 RECIPES = [
     Recipe("planks", 4, {"wood": 1}),
+    Recipe("verband", 3, {"cloth": 1}),
+    Recipe("verband", 1, {"wool": 1, "herb": 1}),
     Recipe("workbench", 1, {"planks": 8}),
     Recipe("torch", 4, {"wood": 1, "coal": 1}),
     Recipe("torch", 2, {"wood": 2}),

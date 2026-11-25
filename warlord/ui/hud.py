@@ -405,6 +405,8 @@ class UI:
                 opts.append(("[Freiheit erkaufen|buy freedom] (100 Pf)", "free", self.opt_freedom))
             opts.append(("[Lehnseid schwören|swear fealty]", "fealty", self.opt_fealty))
             opts.append(("[Um ein Lehen bitten|ask for a fief]", "fief", self.opt_fief))
+        if person and person.job in ("priest", "monk") and (g.player.injury or g.player.hp < g.player.max_hp):
+            opts.append(("[Heilen lassen|be healed] (5 Pf)", "heal", self.opt_heal))
         if person and person.job in ("carter",):
             opts.append(("[Fahrt|ride] → map", "travel", lambda: self.open("map")))
         if g.story is not None:
@@ -419,6 +421,18 @@ class UI:
         cats = [person.job if person else "rumor", "rumor", g.greeting_category()]
         line = D.pick(g.rng.choice(cats), g.npc_ctx(self.npc), g.rng) or D.pick("rumor", g.npc_ctx(self.npc), g.rng)
         self.set_line(line)
+
+    def opt_heal(self):
+        from ..combat import injury as INJ
+        p = self.g.player
+        if p.inv.money < 5:
+            self.set_line("A small [Spende|donation] for the [Kloster|monastery], please.")
+            return
+        p.inv.money -= 5
+        INJ.rest(p, 24)
+        p.bandaged = True
+        p.hp = p.max_hp
+        self.set_line("[Gott|God] heals, I only bind the [Wunden|wounds]. Go in [Frieden|peace].")
 
     def opt_trade(self):
         self.modal = "trade"
@@ -974,6 +988,7 @@ class UI:
         if p.head_under or p.breath < 12:
             bar(surf, 20, 66, 150, 6, p.breath / 12, (120, 180, 240))
             text(surf, "Atem (breath)", (176, 62), 11)
+        self.draw_body_doll(surf, 266, 10, p)
         r = rank_of(p.rank)
         text(surf, f"{r.de} ({r.en})", (20, 78), 13, GERMAN_COLOR)
         text(surf, f"{p.inv.money} Pf · Ehre {p.ehre}", (250, 78), 12, right=True)
@@ -1068,6 +1083,40 @@ class UI:
             g.battle.draw_hud(surf)
         # tiny controls hint
         text(surf, "H = Hilfe (help)", (SCREEN_W - 12, SCREEN_H - 18), 11, (150, 150, 140), right=True)
+
+    def draw_body_doll(self, surf, x, y, h):
+        """Little body diagram: each part coloured by its wound level, armour hardness as an outline."""
+        from ..combat import injury as INJ
+        panel(surf, (x, y, 44, 92), 170)
+        cols = [(110, 170, 90), (220, 190, 60), (230, 120, 50), (200, 40, 40)]
+        inj = h.injury
+        cx = x + 22
+
+        def c(part):
+            return cols[inj.get(part, 0)]
+
+        def edge(part):
+            hd = INJ.hardness(h, part)
+            return (210, 214, 224) if hd >= 5 else (170, 150, 110) if hd > 0 else (40, 34, 30)
+        pygame.draw.circle(surf, c("head"), (cx, y + 14), 6)
+        pygame.draw.circle(surf, edge("head"), (cx, y + 14), 6, 1)
+        r = pygame.Rect(cx - 7, y + 22, 14, 26)
+        pygame.draw.rect(surf, c("torso"), r)
+        pygame.draw.rect(surf, edge("torso"), r, 1)
+        for part, ax in (("arm_s", cx - 13), ("arm_w", cx + 9)):
+            ra = pygame.Rect(ax, y + 23, 4, 24)
+            pygame.draw.rect(surf, c(part), ra)
+            pygame.draw.rect(surf, edge(part), ra, 1)
+        for lx in (cx - 6, cx + 1):
+            rl = pygame.Rect(lx, y + 50, 5, 28)
+            pygame.draw.rect(surf, c("legs"), rl)
+            pygame.draw.rect(surf, edge("legs"), rl, 1)
+        if inj and not h.bandaged and any(v >= 1 for v in inj.values()):
+            if (pygame.time.get_ticks() // 400) % 2 == 0:
+                pygame.draw.polygon(surf, (200, 30, 30), [(x + 36, y + 80), (x + 39, y + 73), (x + 42, y + 80),
+                                                          (x + 39, y + 84)])
+        elif h.bandaged and inj:
+            text(surf, "+", (x + 36, y + 72), 14, (236, 230, 214))
 
     def draw_orders(self, surf):
         g = self.g
