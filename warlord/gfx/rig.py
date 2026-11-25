@@ -458,7 +458,13 @@ def draw_humanoid(surf, h, sx, sy, scale=1.0, tint=None):
     quad(surf, J["kb"], J["fb"], 1.8 * S, 1.4 * S, shade(hose, back))
     _foot(surf, J["kb"], J["fb"], f, shade(boots, back), S)
     if h.shield is not None and not p.shield_up and not tint:
-        _draw_shield(surf, h, J["hb"], f, S, raised=False)
+        if getattr(h, "mount", None) is not None:
+            # riding: the shield hangs from the saddle by its strap, behind the rider's leg
+            _draw_shield(surf, h, (hip[0] - f * 11 * S, hip[1] + 10 * S), f, S * 0.9, raised=False)
+            pygame.draw.line(surf, (70, 46, 28), (hip[0] - f * 6 * S, hip[1] + 1 * S),
+                             (hip[0] - f * 11 * S, hip[1] + 5 * S), 1)
+        else:
+            _draw_shield(surf, h, J["hb"], f, S, raised=False)
     # -------------------------------------------------- torso
     Tt = frame(hip, fwd, down)
     tl = ul / S

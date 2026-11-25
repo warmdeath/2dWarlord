@@ -9,7 +9,9 @@ import random
 
 import pygame
 
-TREE_HP = {"oak": 90, "beech": 80, "pine": 60, "fir": 70, "birch": 45, "dead": 30, "willow": 55, "lime": 85}
+# hit points for a tree of 180 px with a 13 px trunk; they grow with height and with the trunk's cross-section,
+# so a slim birch falls in a few strokes and an old oak takes a good while (hard, dense wood on top)
+TREE_HP = {"oak": 260, "beech": 200, "pine": 110, "fir": 120, "birch": 60, "dead": 40, "willow": 80, "lime": 150}
 LEAF = {
     "oak": [(64, 104, 46), (82, 126, 54), (104, 146, 62)],
     "beech": [(76, 116, 48), (98, 140, 58), (124, 162, 70)],
@@ -41,7 +43,8 @@ class Tree:
         self.h = float(height)
         self.tw = float(trunk)
         self.seed = seed
-        self.hp = self.max_hp = TREE_HP.get(kind, 60) * (height / 180.0)
+        hp = TREE_HP.get(kind, 60) * (height / 180.0) * (trunk / 13.0) ** 2
+        self.hp = self.max_hp = max(30.0 if kind == "dead" else 60.0, hp)
         self.state = "stand"     # stand | stump
         self.regrow = 0.0
         self.burn = 0.0

@@ -87,7 +87,8 @@ Python 3.10+. Classic `pygame` 2.x also works. F11 toggles fullscreen, F3 shows 
   rigid body and the physics engine decides how the wall or the roof comes down. Fire runs through timber,
   thatch and shingles piece by piece.
 - **The few things you do with your hands:**
-  - **Fell trees.** Chop with an axe; the trunk becomes a rigid body hinged on its stump and topples away from
+  - **Fell trees.** Chop with an axe. Thick trunks of hard wood take longest: a slim birch falls in a couple of
+    strokes, a pine in a few seconds, an old oak in a quarter of a minute. The trunk becomes a rigid body hinged on its stump and topples away from
     you — the crown crashes down, hurts whoever stands there, and scatters wood and saplings. Stumps regrow.
   - **Buck and carry.** Cut a lying trunk where you strike it. Small logs go in the bag; big ones you carry in
     both arms, slowly.
@@ -115,7 +116,8 @@ Python 3.10+. Classic `pygame` 2.x also works. F11 toggles fullscreen, F3 shows 
 - **Animals with skeletons.** Horses, cattle, sheep, pigs, deer, boar, wolves and bears have four two-bone legs
   solved by inverse kinematics and real gaits — a four-beat walk, a diagonal trot, a rotary gallop with
   suspension. Riders sit astride in the saddle, legs down to the stirrups, both hands on the reins when they
-  carry nothing (one hand when armed), leaning into the gallop. Hind legs fold at the hock, the body rocks, the
+  carry nothing (one hand when armed), leaning into the gallop; the shield hangs from the saddle until they
+  raise it. Hind legs fold at the hock, the body rocks, the
   neck nods, herd animals graze, horses wear saddle,
   blanket and bridle.
 - **Ragdolls with joints.** The fallen become chains of rigid bones pinned at the joints with rotation limits;
