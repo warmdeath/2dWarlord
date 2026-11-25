@@ -130,6 +130,8 @@ _w(key="hammer", de="Hammer", en="hammer", kind="tool", dmg=9, dtype="blunt", re
    tool_power={"pick": 1.2, "axe": 1.2}, style="hammer")
 _w(key="sichel", de="Sichel", en="sickle", kind="tool", dmg=7, dtype="cut", reach=28, speed=1.3, length=18,
    tool_power={"axe": 1.0}, style="sickle")
+_w(key="hacke", de="Hacke", en="hoe", kind="tool", dmg=6, dtype="cut", reach=30, speed=1.1, length=24,
+   tool_power={"pick": 0.8}, style="hoe", note="Turns grass into a field (Acker).")
 _w(key="fackel", de="Fackel", en="torch", kind="torch", dmg=6, dtype="blunt", reach=30, speed=1.1, length=20,
    flags=("fire",), style="torch", note="Lights the dark — and sets thatch ablaze.")
 

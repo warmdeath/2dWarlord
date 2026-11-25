@@ -73,6 +73,13 @@ def generate(width=48000, seed=1300, out=None):
         height -= np.clip(1 - d / 220.0, 0, 1) ** 1.6 * 40
     # ocean shelf: make sure the sea floor really is below sea level, coasts slope
     height = np.clip(height, 24, H - 30)
+    # leveling: vineyards are cut into terraces, hills break into plateaus with low ledges (max 2 tiles,
+    # so carts, formations and people can still climb them)
+    terr = np.isin(names, ["vineyard", "hills"])
+    quant = np.floor(height / 2.0) * 2.0
+    plate = fbm1(xs, 1 / 40.0, seed + 17, octaves=2)
+    blend = np.where(names == "vineyard", 1.0, np.clip((plate - 0.45) * 4, 0, 1))
+    height = np.where(terr, height * (1 - blend) + quant * blend, height)
     surface = height.astype(np.int32)
 
     # lakes & a river valley (carved as dips that will fill with water)
@@ -328,6 +335,8 @@ def generate(width=48000, seed=1300, out=None):
                     "edge": "dead", "ashland": "dead", "volcanic": "dead"}.get(b, "oak")
             if b == "forest" and rng.random() < 0.3:
                 kind = "pine"
+            elif b in ("forest", "plains", "hills") and rng.random() < 0.18:
+                kind = "birch"
             if b == "moor" and rng.random() < 0.5:
                 kind = "dead"
             grow_tree(w, x, g, kind, rng)
@@ -344,6 +353,23 @@ def generate(width=48000, seed=1300, out=None):
                 w.fg[x, g - 1] = T.BUSH.id
             elif b == "vineyard" and q < 0.5 and g < 100:
                 w.fg[x, g - 1] = T.VINE.id
+            elif b in ("forest", "moor") and q < 0.45:
+                w.fg[x, g - 1] = T.FERN.id
+            elif b in ("plains", "hills") and q < 0.31:
+                w.fg[x, g - 1] = T.HEATHER.id if b == "hills" else T.FLOWER.id
+            elif q > 0.988 and b in ("plains", "hills", "mountains", "forest"):
+                # Findling: a glacial boulder
+                for dx in (0, 1):
+                    for dy in (1, 2):
+                        if w.fg[x + dx, g - dy] == 0:
+                            w.fg[x + dx, g - dy] = T.BOULDER.id
+        elif b == "edge" and top == T.DEADGRASS.id and rng.random() < 0.08:
+            w.fg[x, g - 1] = T.HEATHER.id
+        # reeds where land meets still water
+        if rng.random() < 0.7 and w.fg[x, g - 1] == 0 and (
+                (x + 1 < width and w.liq[x + 1, g - 1]) or (x > 0 and w.liq[x - 1, g - 1])) and \
+                not w.lava[x + 1, g - 1]:
+            w.fg[x, g - 1] = T.REED.id
         x += 1
     # seabed life + shipwrecks
     for x in range(aw, width - 60):
@@ -368,6 +394,32 @@ def generate(width=48000, seed=1300, out=None):
         if w.fg[x, y] == 0 and T.SOLID[w.fg[x, y + 1]] and w.bg[x, y] and not w.liq[x, y]:
             w.fg[x, y] = T.MUSHROOM.id
 
+    # ---------------------------------------------------------------- bridges
+    yield 0.93, "Brücken werden geschlagen… (building bridges)"
+    for lx0, lx1, lvl in lakes:
+        if not w.settlement_at(lx0, margin=5):
+            S.bridge(w, lx0 - 1, lx1, lvl - 1, rng, stone=True)
+    # timber trestles over ravines in the hills and mountains
+    x = aw + 200
+    built = 0
+    while x < width - 200:
+        if names[x] in ("mountains", "hills", "snow") and not occupied[x]:
+            h0 = int(w.surface[x])
+            for span in range(6, 44):
+                x2 = x + span
+                if x2 >= width or occupied[x2]:
+                    break
+                h2 = int(w.surface[x2])
+                if abs(h2 - h0) <= 1 and span > 6:
+                    deepest = int(w.surface[x + 1:x2].max())
+                    if deepest - h0 >= 8:
+                        S.bridge(w, x, x2, min(h0, h2) - 1, rng, stone=names[x] != "snow" and span < 24)
+                        built += 1
+                        x = x2
+                    break
+                if h2 < h0 - 1:
+                    break
+        x += 3
     # ---------------------------------------------------------------- signposts between settlements
     yield 0.95, "Wegweiser werden aufgestellt… (placing signposts)"
     for a, b in zip(w.settlements, w.settlements[1:]):
@@ -403,6 +455,16 @@ def grow_tree(w, x, g, kind, rng):
         for y in range(cy, g - h):
             if 0 <= y < w.h:
                 w.fg[x, y] = T.LOG.id
+    elif kind == "birch":
+        h = rng.randint(7, 11)
+        for y in range(g - h, g):
+            w.fg[x, y] = T.BIRCH.id
+        for dy in range(-3, 2):
+            half = 2 if -2 <= dy <= 0 else 1
+            for dx in range(-half, half + 1):
+                xx, yy = x + dx, g - h + dy
+                if 0 <= xx < w.w and 0 <= yy < w.h and w.fg[xx, yy] == 0:
+                    w.fg[xx, yy] = T.LEAVES.id
     elif kind == "pine":
         h = rng.randint(9, 15)
         for y in range(g - h, g):
@@ -434,7 +496,12 @@ def grow_tree(w, x, g, kind, rng):
 def build_settlement(w, p, rng):
     t, x0, x1, g = p["type"], p["x0"], p["x1"], p["g"]
     k = p["kingdom"]
-    style = {"frostholm": "snow", "glutmark": "ash"}.get(k, "peasant")
+    # every realm builds in its own way
+    style = {"frostholm": "longhouse", "glutmark": "basalt", "waldheim": "log", "randmark": "chained"}.get(k,
+                                                                                                       "peasant")
+    town_style = {"hochburg": "tower", "luebenau": "brick", "frostholm": "stone", "glutmark": "basalt"}.get(
+        k, "burgher")
+    crops = CULTURE_CROPS.get(k, ("wheat",))
     recs = []
     # clear the air above the footprint and pave
     S.clear_box(w, x0, x1, g - 40, g - 1)
@@ -463,7 +530,9 @@ def build_settlement(w, p, rng):
                 recs.append(S.windmill(w, cur, g))
                 cur += 8
                 continue
-            hw = rng.randint(7, 10)
+            hw = rng.randint(7, 10) if style != "longhouse" else rng.randint(13, 16)
+            if cur + hw + 6 > x1 - 6:
+                break
             kind = "smithy" if i == 1 and t == "village" else "house"
             h = S.house(w, cur, g, width=hw, height=4, style=style, door_side=rng.choice((-1, 1)), rng=rng,
                         kind=kind)
@@ -471,15 +540,20 @@ def build_settlement(w, p, rng):
                 S._put(w, h["x0"] + 2, g - 1, T.ANVIL.id)
                 S._put(w, h["x0"] + 3, g - 1, T.FORGE.id)
             recs.append(h)
-            cur += hw + rng.randint(2, 4)
-            if rng.random() < 0.55 and cur + 14 < x1 - 6 and style != "ash":
+            cur += hw + rng.randint(2, 4) + (5 if style == "chained" else 0)
+            if rng.random() < 0.55 and cur + 22 < x1 - 6 and style != "basalt":
                 fw = rng.randint(8, 14)
-                recs.append(S.field(w, cur, cur + fw, g, rng))
-                cur += fw + 2
+                cur += 4
+                recs.append(S.field(w, cur, cur + fw, g, rng, rng.choice(crops)))
+                S.walkway(w, cur, cur + fw, g)
+                cur += fw + 6
         if t == "village" and k not in ("glutmark",):
-            fw = min(16, x1 - 6 - cur)
+            fw = min(16, x1 - 10 - cur)
             if fw > 5:
-                recs.append(S.field(w, cur, cur + fw, g, rng))
+                recs.append(S.field(w, cur + 4, cur + 4 + fw, g, rng, rng.choice(crops)))
+                S.walkway(w, cur + 4, cur + 4 + fw, g)
+        if k == "waldheim" and x1 + 12 < w.w:
+            charcoal_kiln(w, x1 + 8, g, rng)
     elif t in ("town", "city", "capital"):
         gate_w = S.wall_tower(w, x0 + 2, g, height=8, thick=2, gate=True)
         recs.append(gate_w)
@@ -491,11 +565,13 @@ def build_settlement(w, p, rng):
             recs.extend(crecs)
             cur = castle_end + 4
         n = 0
+        prev_tower = None
         while cur + 12 < end:
             n += 1
             if n == 3:
                 recs.append(S.church(w, cur, g, width=15, rng=rng))
                 cur += 18
+                prev_tower = None
                 continue
             if n == 5:
                 # market square
@@ -503,14 +579,24 @@ def build_settlement(w, p, rng):
                     recs.append(S.stall(w, cur + i * 5, g, rng))
                 recs.append(S.well(w, cur + 16, g))
                 cur += 20
+                prev_tower = None
                 continue
-            hw = rng.randint(8, 11)
             kind = {2: "tavern", 4: "smithy", 6: "townhall"}.get(n, "house")
             if kind == "townhall" and t == "town":
                 kind = "house"
-            h = S.house(w, cur, g, width=hw + (3 if kind in ("tavern", "townhall") else 0), height=4,
-                        style="burgher" if style == "peasant" else style, door_side=rng.choice((-1, 1)), rng=rng,
-                        kind=kind)
+            st = town_style
+            floors = None
+            if st == "tower":
+                # Hochburg's master builders stack their houses into towers (Geschlechtertürme)
+                hw = rng.randint(6, 8)
+                floors = rng.randint(3, 5) if kind == "house" else 2
+            elif st == "brick":
+                hw = rng.randint(7, 9)
+            else:
+                hw = rng.randint(8, 11)
+            hw += 3 if kind in ("tavern", "townhall") else 0
+            h = S.house(w, cur, g, width=hw, height=4, style=st, door_side=rng.choice((-1, 1)), rng=rng,
+                        kind=kind, floors=floors)
             if kind == "smithy":
                 S._put(w, h["x0"] + 2, g - 1, T.ANVIL.id)
                 S._put(w, h["x0"] + 3, g - 1, T.FORGE.id)
@@ -518,7 +604,15 @@ def build_settlement(w, p, rng):
                 S._put(w, h["x0"] + 3, g - 1, T.BARREL.id)
                 S._put(w, h["x0"] + 4, g - 1, T.BARREL.id)
             recs.append(h)
-            cur = h["x1"] + rng.randint(1, 3)
+            gap = rng.randint(1, 3) if st != "tower" else 3
+            if st == "tower" and prev_tower is not None and h["floors"] and prev_tower["floors"]:
+                # a plank bridge between the first upper floors of neighbouring tower houses
+                fy = min(h["floors"][0], prev_tower["floors"][0])
+                for xx in range(prev_tower["x1"], h["x0"] + 1):
+                    if w.fg[xx, fy] == 0:
+                        w.fg[xx, fy] = T.PLATFORM.id
+            prev_tower = h if st == "tower" else None
+            cur = h["x1"] + gap
         recs.append(S.wall_tower(w, x1 - 4, g, height=8, thick=2, gate=True))
     elif t in ("castle", "robber"):
         crecs, _ = S.castle(w, x0 + 4, g, rng, size="castle")
@@ -565,3 +659,17 @@ def build_settlement(w, p, rng):
 
 
 BIOME_TOP = {"glutmark": T.ASH.id, "frostholm": T.SNOW.id, "randmark": T.GRASS.id}
+# what each realm grows: rye is the bread grain of the north, oats feed horses, flax becomes linen
+CULTURE_CROPS = {"randmark": ("rye", "rye", "oat"), "waldheim": ("rye", "oat"), "hochburg": ("wheat", "oat"),
+                 "heiligenstein": ("wheat", "flax"), "luebenau": ("flax", "wheat", "rye"),
+                 "frostholm": ("oat", "turnip"), "glutmark": ("turnip",)}
+
+
+def charcoal_kiln(w, x, g, rng):
+    """Kohlenmeiler: a smoking earth mound where wood becomes charcoal."""
+    for dx in range(-4, 5):
+        hgt = 3 - abs(dx) // 2
+        for y in range(g - hgt, g):
+            if 0 <= x + dx < w.w and w.fg[x + dx, y] == 0:
+                w.fg[x + dx, y] = T.ASH.id if (dx + y) % 3 else T.DIRT.id
+    w.smokers.append((x, g - 4))

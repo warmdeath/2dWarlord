@@ -84,6 +84,15 @@ class CombatSystem:
                         g.camera.shake = max(g.camera.shake, 2.5)
                 if res == "parry":
                     return
+        # siege engines can be hacked apart (axes best) or set alight with torches
+        for e in getattr(g, "engines", []):
+            if e.dead or e.uid in att.hit_ids or not g.hostile_factions(att.faction, e.side):
+                continue
+            ex, ey, ew, eh = e.rect(g)
+            if _rect_overlap(r, (ex, ey, ew, eh)):
+                att.hit_ids.add(e.uid)
+                e.damage(g, wd.dmg * mv.dmg * (1.8 if wd.key == "axt" else 0.6), 0.25 if e.key != "ramm" else 0.08,
+                         fire="fire" in wd.flags)
         # tools & torches interact with tiles
         if "fire" in wd.flags:
             tx = int((att.cx + att.facing * mv.reach * 0.8) // TILE)
@@ -148,9 +157,27 @@ class CombatSystem:
                     t.burning = 3.0
                 p.removed = True
                 return True
+        for e in getattr(g, "engines", []):
+            if e.dead or not g.hostile_factions(p.faction, e.side) or not e.contains(g, p.x, p.y):
+                continue
+            if p.kind in ("stone", "ball"):
+                e.damage(g, 80, 0.5)
+            else:
+                roofed = e.key in ("ramm", "turm")
+                e.damage(g, 2, 0.04 if roofed else 0.18, fire=p.fire)
+            p.removed = True
+            return True
         for hf in g.formations:
             if hf.side == p.faction or hf.dead:
                 continue
+            if p.kind in ("stone", "ball") and hf.contains(p.x, p.y + 10):
+                for _ in range(random.randint(2, 5) if p.kind == "stone" else random.randint(2, 4)):
+                    hf._kill_member(p.x)
+                hf.morale -= 8
+                from . import siege
+                siege.impact(g, p.x, p.y + 8, p.kind)
+                p.removed = True
+                return True
             if not g.hostile_factions(p.faction, hf.side, p.owner, None):
                 continue
             if hf.contains(p.x, p.y):

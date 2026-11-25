@@ -24,6 +24,9 @@ class World:
         self.regions = []        # (x0, x1, biome)
         self.kingdom_spans = []  # (x0, x1, kingdom_key)
         self.settlements = []    # filled by generator (dicts)
+        self.gatehouses = []     # drawbridges / portcullises / pitch slots of fortified castles
+        self.fert = {}           # (x, y) of farmland -> soil fertility (1.0 = rested soil)
+        self.smokers = []        # chimneys and charcoal kilns that smoke
         self.signs = {}          # (x,y) -> text
         self.chests = {}         # (x,y) -> {item: n}
         self.damage = {}         # (x,y) -> accumulated mining damage (seconds)

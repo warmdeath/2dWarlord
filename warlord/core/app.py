@@ -29,6 +29,10 @@ class App:
         self.session = None
         self.running = True
         self.show_fps = False
+        from ..society import lingua
+        self.lingua = lingua.get()
+        self.lingua.new_session()
+        self.lingua_t = 0.0
 
     # ------------------------------------------------------------------ scenes
     def to_menu(self):
@@ -81,6 +85,7 @@ class App:
         return os.path.exists(SAVE_FILE)
 
     def save_game(self):
+        self.lingua.save()
         if self.session is None:
             return
         os.makedirs(SAVE_DIR, exist_ok=True)
@@ -114,10 +119,15 @@ class App:
                     pygame.display.toggle_fullscreen()
             self.scene.update(dt, events)
             self.scene.draw(self.screen)
+            self.lingua_t += dt
+            if self.lingua_t > 60:
+                self.lingua_t = 0.0
+                self.lingua.save()
             if self.show_fps:
                 from ..ui.common import text
                 text(self.screen, f"{self.clock.get_fps():.0f} fps", (SCREEN_W - 70, SCREEN_H - 40), 12)
             pygame.display.flip()
+        self.lingua.save()
         pygame.quit()
 
 

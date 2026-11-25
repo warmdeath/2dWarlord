@@ -197,9 +197,19 @@ class WorldSim:
             if not (1 <= y < w.h - 1):
                 continue
             t = int(w.fg[x, y])
-            if t in T.CROP_STAGES and t != T.WHEAT4.id:
-                if rng.random() < 0.08 * grow:
-                    w.set(x, y, t + 1, wake=False)
+            if t in T.CROP_OF:
+                crop, stage = T.CROP_OF[t]
+                if stage < 3:
+                    in_season = season in T.CROP_SEASONS[crop]
+                    if season == 3 and not in_season and stage >= 1 and rng.random() < 0.05:
+                        w.set(x, y, 0, wake=False)            # frost kills the summer crops
+                        continue
+                    fert = w.fert.get((x, y + 1), 1.0)
+                    rate = 0.08 * (1.0 + env.rain() * 1.5) * fert * (1.0 if in_season else 0.12)
+                    if season == 3 and crop == "rye":
+                        rate *= 0.5                            # winter rye grows slowly under the snow
+                    if rng.random() < rate:
+                        w.set(x, y, T.CROPS[crop][stage + 1], wake=False)
             elif t == T.SAPLING.id:
                 if rng.random() < 0.02 * grow:
                     w.fg[x, y] = 0
@@ -213,7 +223,7 @@ class WorldSim:
                 found = False
                 for dx in range(-4, 5):
                     for dy in range(-1, 6):
-                        if w.inside(x + dx, y + dy) and w.fg[x + dx, y + dy] == T.LOG.id:
+                        if w.inside(x + dx, y + dy) and w.fg[x + dx, y + dy] in (T.LOG.id, T.BIRCH.id):
                             found = True
                             break
                     if found:
@@ -231,10 +241,61 @@ class WorldSim:
                 w.set(x, y - 1, T.TALLGRASS.id if rng.random() < 0.8 else T.FLOWER.id, wake=False)
 
     # ------------------------------------------------------------------ support / collapse
+    def check_span(self, x, y):
+        """Masonry can arch over a gap of 2 tiles. If the ground under a built stack opens 3+ tiles wide
+        (sapping, burnt props, a dug-out foundation), every stack over the gap comes down."""
+        g = self.game
+        w = g.world
+        row = y - 1
+
+        def built(cx, cy):
+            return w.inside(cx, cy) and T.BUILT[w.fg[cx, cy]] and T.SOLID[w.fg[cx, cy]]
+
+        def open_(cx, cy):
+            return w.inside(cx, cy) and not T.SOLID[w.fg[cx, cy]]
+        if not (built(x, row) and open_(x, y)):
+            return False
+        lo = hi = x
+        while built(lo - 1, row) and open_(lo - 1, y) and x - lo < 30:
+            lo -= 1
+        while built(hi + 1, row) and open_(hi + 1, y) and hi - x < 30:
+            hi += 1
+        if hi - lo + 1 < 3:
+            return False
+        g.fx.text(x * TILE, (row - 6) * TILE, "Einsturz!", (255, 200, 150), gloss="collapse!")
+        g.camera.shake = max(g.camera.shake, 9)
+        g.sfx("collapse")
+        n = 0
+        for cx in range(lo, hi + 1):
+            cy = row
+            while cy > 0 and w.inside(cx, cy) and (T.BUILT[w.fg[cx, cy]] or T.PLATFORM_T[w.fg[cx, cy]] or
+                                                   T.CLIMB[w.fg[cx, cy]]) and w.fg[cx, cy]:
+                tid = int(w.fg[cx, cy])
+                w.set(cx, cy, 0)
+                w.fires.pop((cx, cy), None)
+                if n < 220:
+                    g.spawn_falling(cx, cy, tid)
+                n += 1
+                cy -= 1
+        # whatever is left hanging in the air falls too
+        for cx in (lo - 1, hi + 1):
+            for cy in range(row - 20, row + 1):
+                if built(cx, cy):
+                    comp = self._component(cx, cy, 400)
+                    if comp:
+                        for (ax, ay) in sorted(comp, key=lambda c: -c[1]):
+                            tid = int(w.fg[ax, ay])
+                            w.set(ax, ay, 0)
+                            g.spawn_falling(ax, ay, tid)
+                    break
+        return True
+
     def check_support(self, x, y):
         """Called after a tile at (x,y) disappears. Unsupported built structures collapse."""
         g = self.game
         w = g.world
+        if self.check_span(x, y):
+            return
         # sand and gravel above fall
         ay = y - 1
         while w.inside(x, ay) and T.FALLS[w.fg[x, ay]]:

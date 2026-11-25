@@ -129,6 +129,9 @@ class Session:
         self.game_over = False
         self.zoom = 1.0
         self._view = None
+        self.engines = []        # siege engines
+        self.ladders = []        # raised assault ladders
+        self.assaulters = []     # men who came over the wall
         # player
         self.player = Player(0, 0, self.rng, rank=player_rank)
         self.player.inv.money = 25
@@ -143,12 +146,21 @@ class Session:
     # ================================================================== persistence
     def __getstate__(self):
         d = self.__dict__.copy()
-        for k in ("app", "renderer", "ui", "audio", "_view"):
+        for k in ("app", "renderer", "ui", "audio", "_view", "ambient"):
             d[k] = None
         return d
 
     def restore(self, app):
+        for k in ("engines", "ladders", "assaulters"):
+            if not hasattr(self, k):
+                setattr(self, k, [])
+        if not hasattr(self.world, "gatehouses"):
+            self.world.gatehouses = []
         self.app = app
+        if not hasattr(self.world, "fert"):
+            self.world.fert = {}
+        if not hasattr(self.world, "smokers"):
+            self.world.smokers = []
         self.renderer = Renderer(self.world)
         self.ui = UI(self)
         self.audio = audio.Audio()
@@ -211,6 +223,12 @@ class Session:
 
     def remove_entity(self, e):
         e.removed = True
+
+    def spawn_engine(self, key, x, side, facing, colors=None):
+        from ..combat.siege import SiegeEngine
+        e = SiegeEngine(self, key, x, side, facing, colors or ((120, 120, 120), (220, 220, 220)))
+        self.engines.append(e)
+        return e
 
     def spawn_horse(self, x, y, wild=True):
         a = Animal(x - 20, y - 31, "horse")
@@ -331,7 +349,7 @@ class Session:
         if tid == 0:
             return
         td = T.TILES[tid]
-        if tid == T.LOG.id:
+        if tid in (T.LOG.id, T.BIRCH.id):
             self.fell_tree(x, y, by)
             return
         if tid in (T.DOOR.id, T.DOOR_OPEN.id, T.GATE.id, T.GATE_OPEN.id):
@@ -351,9 +369,16 @@ class Session:
         w.fires.pop((x, y), None)
         self.fx.debris(x * TILE + 8, y * TILE + 8, td.color, 6)
         if drop:
-            if tid == T.WHEAT4.id:
-                self.drop_item("wheat", self.rng.randint(1, 3), x * TILE + 8, y * TILE + 8)
-                self.drop_item("seeds", self.rng.randint(1, 2), x * TILE + 8, y * TILE + 8)
+            if tid in T.RIPE:
+                crop = T.CROP_OF[tid][0]
+                fert = w.fert.get((x, y + 1), 1.0)
+                produce = {"wheat": "wheat", "rye": "rye", "oat": "oats", "flax": "flax", "turnip": "turnip"}[crop]
+                seed = {"wheat": "seeds", "rye": "seeds_rye", "oat": "seeds_oat", "flax": "seeds_flax",
+                        "turnip": "seeds_turnip"}[crop]
+                self.drop_item(produce, max(1, int(round(1 + 2.2 * fert * self.rng.uniform(0.7, 1.2)))),
+                               x * TILE + 8, y * TILE + 8)
+                self.drop_item(seed, self.rng.randint(1, 2), x * TILE + 8, y * TILE + 8)
+                w.fert[(x, y + 1)] = max(0.15, fert - 0.25)   # every harvest tires the soil
             elif tid == T.CHEST.id:
                 for k, n in w.chests.pop((x, y), {}).items():
                     if n:
@@ -372,7 +397,7 @@ class Session:
         w = self.world
         # walk down to the base, then collect the connected trunk and crown
         base = y
-        while w.inside(x, base + 1) and w.fg[x, base + 1] == T.LOG.id:
+        while w.inside(x, base + 1) and w.fg[x, base + 1] in (T.LOG.id, T.BIRCH.id):
             base += 1
         stack = [(x, base)]
         seen = set()
@@ -382,12 +407,12 @@ class Session:
             if (cx, cy) in seen or not w.inside(cx, cy):
                 continue
             t = int(w.fg[cx, cy])
-            if t not in (T.LOG.id, T.LEAVES.id, T.PINE.id):
+            if t not in (T.LOG.id, T.LEAVES.id, T.PINE.id, T.BIRCH.id):
                 continue
             if cy > base:
                 continue
             seen.add((cx, cy))
-            if t == T.LOG.id:
+            if t in (T.LOG.id, T.BIRCH.id):
                 logs += 1
             for nx, ny in ((cx, cy - 1), (cx - 1, cy), (cx + 1, cy), (cx, cy + 1)):
                 stack.append((nx, ny))
@@ -433,10 +458,9 @@ class Session:
                    for a, b in neighbours) and not w.bg[tx, ty]:
             return False
         below = int(w.fg[tx, ty + 1]) if w.inside(tx, ty + 1) else 0
-        if key == "seeds":
-            if below in (T.GRASS.id, T.DIRT.id, T.MUD.id):
-                w.set(tx, ty + 1, T.FARMLAND.id)
-            elif below != T.FARMLAND.id:
+        if key.startswith("seeds"):
+            if below != T.FARMLAND.id:
+                self.ui.toast("Seeds need a tilled [Acker|field]: work the ground with a [Hacke|hoe] first.", 3)
                 return False
         if key == "sapling" and below not in (T.GRASS.id, T.DIRT.id, T.SNOW.id, T.MUD.id):
             return False
@@ -559,6 +583,59 @@ class Session:
         self.sfx("eat")
         self.sync_held()
 
+    def trample(self, dt):
+        """Running feet and hooves flatten growing crops — that's why villages build walkways over fields."""
+        w = self.world
+        for e in list(self.humanoids) + list(self.animals):
+            if e.dead or not e.on_ground or e.removed:
+                continue
+            speed = abs(e.mount.vx) if getattr(e, "mount", None) is not None else abs(e.vx)
+            heavy = getattr(e, "species", "") in ("horse", "cow", "pig", "boar", "bear")
+            if speed < (40 if heavy else 105):
+                continue
+            tx, ty = int(e.cx // TILE), int((e.feet - 1) // TILE)
+            if not w.inside(tx, ty):
+                continue
+            t = int(w.fg[tx, ty])
+            if t in T.CROP_OF and T.CROP_OF[t][1] >= 1 and self.rng.random() < dt * 6:
+                crop = T.CROP_OF[t][0]
+                w.set(tx, ty, T.CROPS[crop][0], wake=False)
+                self.fx.debris(tx * TILE + 8, ty * TILE + 10, (150, 170, 80), 3)
+                if e is self.player or getattr(e, "rider", None) is self.player:
+                    if not getattr(self, "_trample_warned", False):
+                        self._trample_warned = True
+                        self.ui.toast("[Zertrampelt|trampled]! The farmers won't thank you. Use the walkways.")
+                    self.player.ehre -= 0 if self.rng.random() < 0.8 else 1
+        p = self.player
+        if p.mount is not None and p.inv.count("pflug") and p.intent.crouch:
+            # ploughing behind the horse
+            tx, ty = int(p.mount.cx // TILE), int(p.mount.feet // TILE)
+            if w.inside(tx, ty) and w.fg[tx, ty] in (T.GRASS.id, T.DIRT.id, T.MUD.id) and w.fg[tx, ty - 1] in (
+                    0, T.TALLGRASS.id, T.FLOWER.id):
+                w.set(tx, ty - 1, 0, wake=False)
+                w.set(tx, ty, T.FARMLAND.id, wake=False)
+                self.fx.dust(tx * TILE + 8, ty * TILE, 3, (112, 78, 52))
+
+    def till(self, tx, ty):
+        w = self.world
+        t = int(w.fg[tx, ty]) if w.inside(tx, ty) else 0
+        if t in (T.GRASS.id, T.DIRT.id, T.MUD.id) and not T.SOLID[w.fg[tx, ty - 1]]:
+            if w.fg[tx, ty - 1] in (T.TALLGRASS.id, T.FLOWER.id):
+                w.set(tx, ty - 1, 0)
+            w.set(tx, ty, T.FARMLAND.id)
+            self.fx.dust(tx * TILE + 8, ty * TILE, 4, (112, 78, 52))
+            return True
+        return False
+
+    def manure(self, tx, ty):
+        w = self.world
+        if w.inside(tx, ty) and w.fg[tx, ty] == T.FARMLAND.id and self.player.inv.remove("mist", 1):
+            w.fert[(tx, ty)] = min(1.5, w.fert.get((tx, ty), 1.0) + 0.5)
+            self.fx.text(tx * TILE, ty * TILE - 20, "Gedüngt", (180, 150, 90), gloss="manured")
+            self.sync_held()
+            return True
+        return False
+
     def bandage(self, h):
         from ..combat import injury as INJ
         inv = getattr(h, "inv", None)
@@ -661,14 +738,22 @@ class Session:
         line = D.pick(cat, self.npc_ctx(h), self.rng)
         if not line:
             return
+        from ..society import lingua
+        line = lingua.get().weave(line)
         h.say(line, t=4.5)
         if abs(h.cx - self.player.cx) < 300 and abs(h.cy - self.player.cy) < 200:
             self.hear(line, cat)
 
     def hear(self, line, ctx="", toast=True):
+        from ..society import lingua
+        L = lingua.get()
+        line = L.weave(line)
         new = self.player.dict.learn(line, ctx)
         if new and toast:
             self.ui.new_words(new)
+        for de in L.count_text(line):
+            e = L.words.get(de, {})
+            self.ui.toast(f"Gemeistert: [{de}|{e.get('en', '')}] ✓ — no more translation for this word.", 4)
         self.player.stats["words"] = len(self.player.dict.words)
 
     def greeting_category(self):
@@ -682,6 +767,8 @@ class Session:
         return "greet_night"
 
     def say_msg(self, line, t=5.0):
+        from ..society import lingua
+        line = lingua.get().weave(line)
         self.messages.append([line, t])
         self.messages = self.messages[-6:]
         self.hear(line, "msg", toast=False)
@@ -984,6 +1071,13 @@ class Session:
         if hf.ai_t > 0:
             return
         hf.ai_t = 1.0
+        if getattr(hf, "no_advance", False):
+            if hf.order not in ("halt",):
+                hf.order = "halt"
+            return
+        ldr = hf.leader
+        if hf.order == "folgt" and ldr is not None and getattr(ldr, "kind", "") == "engine" and not ldr.dead:
+            return
         enemy, dist = hf.nearest_enemy()
         player_threat = abs(self.player.cx - hf.x) < 500 and self.hostile_factions(hf.side, "player")
         if enemy is None and not player_threat:
@@ -1123,6 +1217,9 @@ class Session:
             if not a.removed and abs(a.cx - p.cx) < 2600:
                 a.update(self, dt)
                 self.handle_void(a, dt)
+                if a.species in ("cow", "sheep", "pig", "horse") and self.rng.random() < dt * 0.006 and not a.dead:
+                    self.drop_item("mist", 1, a.cx, a.feet - 6)
+        self.trample(dt)
         for b in self.boats:
             if abs(b.cx - p.cx) < 3000:
                 b.update(self, dt)
@@ -1132,6 +1229,10 @@ class Session:
             if not hf.dead:
                 self.ai_command(hf, dt)
                 hf.update(dt)
+        for e in self.engines:
+            e.update(self, dt)
+        from ..combat import siege as SIEGE
+        SIEGE.update(self, dt)
         self.combat.update(dt)
         for d in self.drops:
             d.update(self, dt)
@@ -1163,6 +1264,10 @@ class Session:
         if self.battle is not None:
             self.battle.update(dt)
         self.fx.update(dt)
+        if not hasattr(self, "ambient"):
+            from ..gfx.ambient import Ambient
+            self.ambient = Ambient()
+        self.ambient.update(self, dt, self.view_size())
         for c in self.corpses:
             c[4] += dt
         # cleanup
@@ -1173,6 +1278,7 @@ class Session:
         self.drops = [d for d in self.drops if not d.removed]
         self.falling = [f for f in self.falling if not f.removed]
         self.boats = [b for b in self.boats if not b.removed]
+        self.engines = [e for e in self.engines if not e.removed]
         self.player.followers = [f for f in self.player.followers if not f.dead and not f.removed]
         self.player.haufen = [h for h in self.player.haufen if not h.dead]
         for m in self.messages:
@@ -1210,6 +1316,11 @@ class Session:
 
     def new_day(self):
         self.society.daily(self.env.day, self.world)
+        w = self.world
+        for (x, y), f in list(w.fert.items()):
+            above = int(w.fg[x, y - 1]) if w.inside(x, y - 1) else 0
+            rest = 0.22 if above not in T.CROP_OF else 0.03      # Brache: fallow land recovers
+            w.fert[(x, y)] = min(1.2, f + rest)
         p = self.player
         if p.fiefs:
             income = 0
@@ -1439,6 +1550,11 @@ class Session:
                 self.board_boat(p, b)
                 self.emit("board")
                 return
+        # siege engines you own
+        for e in self.engines:
+            if not e.dead and e.side == "player" and abs(e.x - p.cx) < e.w / 2 + 30:
+                e.toggle(self)
+                return
         # tiles around the player
         tx0, ty0 = int(p.cx // TILE), int(p.cy // TILE)
         cands = []
@@ -1462,6 +1578,30 @@ class Session:
                     self.open_gate(x, y)
                 else:
                     self.ui.toast("The [Tor|gate] is barred against you.")
+                return
+            if tid == T.WINCH.id:
+                from ..combat import siege as SIEGE
+                gh = min(w.gatehouses, key=lambda g_: abs(g_["winch"][0] - x), default=None)
+                if gh is not None:
+                    owner = SIEGE.gatehouse_owner(self, gh)
+                    if owner is not None and self.hostile_factions("player", owner, p, None):
+                        self.ui.toast("Not your castle! The guards would cut you down at the [Winde|winch].")
+                        return
+                    gh["auto"] = False
+                    SIEGE.set_defenses(self, gh, not gh.get("closed"))
+                    self.ui.toast("[Zugbrücke hoch|drawbridge up], [Fallgatter runter|portcullis down]!"
+                                  if gh["closed"] else "[Zugbrücke runter|drawbridge down], [Fallgatter hoch|"
+                                                       "portcullis up]!")
+                return
+            if tid == T.PECHNASE.id or (tid in (T.BRICK.id,) and any(
+                    abs(g_["pechnase"][0] - x) <= 1 and abs(g_["pechnase"][1] - y) <= 2 for g_ in w.gatehouses)):
+                from ..combat import siege as SIEGE
+                gh = min(w.gatehouses, key=lambda g_: abs(g_["pechnase"][0] - x) + abs(g_["pechnase"][1] - y))
+                if p.inv.remove("pech", 1):
+                    SIEGE.pour_pitch(self, gh, by=p)
+                    self.sync_held()
+                else:
+                    self.ui.toast("You need [Pech|pitch] to pour. (Ofen: 3 Holz + 1 Kohle)")
                 return
             if tid == T.SIGN.id:
                 txt = w.signs.get((x, y), "…")
@@ -1570,7 +1710,10 @@ class Session:
         cam = self.camera
         ox, oy = cam.offset()
         env = self.env
+        r.set_season(env.season())
         r.draw_sky(surf, env, cam)
+        if hasattr(self, "ambient"):
+            self.ambient.draw(surf, ox, oy, env)
         r.draw_parallax(surf, env, cam)
         r.draw_terrain(surf, cam)
         self.draw_fires_back(surf, ox, oy)
@@ -1583,6 +1726,8 @@ class Session:
                 pygame.draw.line(surf, proto.look["tunic"], (x - ox - 10, y - oy - 3), (x - ox + 8, y - oy - 4), 4)
         for b in self.boats:
             b.draw(surf, ox, oy)
+        for e in self.engines:
+            e.draw(surf, ox, oy, self)
         for hf in self.formations:
             hf.draw(surf, ox, oy, self.ui.small)
         for a in self.animals:
@@ -1612,6 +1757,8 @@ class Session:
             if pr.fire:
                 lights.append((pr.x, pr.y, 0.6))
         r.draw_lighting(surf, cam, env, lights)
+        if hasattr(self, "ambient"):
+            self.ambient.draw_front(surf, ox, oy)
         self.draw_weather(surf, ox, oy)
         self.ui.draw_world_overlays(surf, ox, oy)
 

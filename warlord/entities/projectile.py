@@ -34,9 +34,9 @@ class Projectile:
             self.removed = True
             return
         env = game.env
-        g = 520 if self.kind != "bolt" else 300
+        g, wind = {"bolt": (300, 30), "stone": (600, 8), "ball": (300, 0)}.get(self.kind, (520, 70))
         self.vy += g * dt
-        self.vx += env.wind * (70 if self.kind != "bolt" else 30) * dt
+        self.vx += env.wind * wind * dt
         steps = max(1, int(math.hypot(self.vx, self.vy) * dt / 6))
         sdt = dt / steps
         w = game.world
@@ -45,7 +45,15 @@ class Projectile:
             self.y += self.vy * sdt
             tx, ty = int(self.x // TILE), int(self.y // TILE)
             if w.inside(tx, ty):
-                if T.SOLID[w.fg[tx, ty]]:
+                if T.SOLID[w.fg[tx, ty]] and w.fg[tx, ty] == T.PORTCULLIS.id and self.kind in ("arrow", "bolt",
+                                                                                             "fire_arrow"):
+                    pass   # arrows fly through the iron grate
+                elif T.SOLID[w.fg[tx, ty]] and self.kind in ("stone", "ball"):
+                    from ..combat import siege
+                    siege.impact(game, self.x, self.y, self.kind)
+                    self.removed = True
+                    return
+                elif T.SOLID[w.fg[tx, ty]]:
                     self.stuck = True
                     if self.fire and T.FLAMMABLE[w.fg[tx, ty]]:
                         game.ignite(tx, ty)
@@ -70,6 +78,14 @@ class Projectile:
     def draw(self, surf, ox, oy):
         x, y = self.x - ox, self.y - oy
         if not (-30 < x < surf.get_width() + 30 and -30 < y < surf.get_height() + 30):
+            return
+        if self.kind == "stone":
+            pygame.draw.polygon(surf, (140, 136, 128), [(x - 6, y - 2), (x - 2, y - 6), (x + 5, y - 4), (x + 6, y + 3),
+                                                        (x, y + 6), (x - 5, y + 4)])
+            return
+        if self.kind == "ball":
+            pygame.draw.circle(surf, (40, 40, 44), (int(x), int(y)), 4)
+            pygame.draw.line(surf, (200, 200, 200), (x - self.vx * 0.02, y - self.vy * 0.02), (x, y), 1)
             return
         ln = 16 if self.kind != "bolt" else 11
         dx, dy = math.cos(self.angle) * ln, math.sin(self.angle) * ln

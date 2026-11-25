@@ -354,7 +354,8 @@ class Haufen:
                 fa, fb = f.span()
                 back = fa if self.facing > 0 else fb
                 gap = (back - self.x) * self.facing
-                if -10 < gap < 24 and (f.center()[0] - self.center()[0]) * self.facing > 0:
+                stuck_ahead = f.contact is not None or f.blocked_by_tile is not None
+                if stuck_ahead and -10 < gap < 24 and (f.center()[0] - self.center()[0]) * self.facing > 0:
                     want = min(want, max(0.0, f.speed))
                     break
         # cavalry charge gets the full gallop only after a run-up
@@ -388,6 +389,16 @@ class Haufen:
         if blocked_tile and self.speed > 0:
             self.blocked_by_tile = blocked_tile
             self.speed = 0
+            if self.order in ("vorwaerts", "angriff") and self.front:
+                from . import siege
+                tid = int(w.fg[blocked_tile])
+                if not T.BUILT[tid]:
+                    siege.ramp(g, self, dt)          # a bank or a cliff: shovel a ramp
+                    return
+                if self.unit.key == "leiter" and siege.ladder(g, self, blocked_tile, dt):
+                    return
+                if self.unit.key == "mineure" and siege.sap(g, self, blocked_tile, dt):
+                    return
             # siege: the front ranks hack at the gate / wall in their way
             if self.order == "angriff" and self.front:
                 tid = int(w.fg[blocked_tile])
