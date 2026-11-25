@@ -7,6 +7,7 @@ import pygame
 from ..settings import TILE, HORSE_WALK, HORSE_GALLOP, JUMP_SPEED
 from .body import Body
 from ..gfx.quadruped import draw_quadruped, draw_horse_at, SPEC
+from ..gfx import paint
 
 SPECIES = {
     #          de        en        w   h   hp  speed  behaviour    drops                     colour
@@ -220,13 +221,15 @@ class Animal(Body):
         c = self.color if not self.hurt_flash else (255, 255, 255)
         if self.species == "fish":
             sw = math.sin(self.anim_t * 8) * 2
-            body = [(cx + f * 8, fy - 5), (cx + f * 2, fy - 9), (cx - f * 5, fy - 7), (cx - f * 7, fy - 5 + sw * 0.3),
-                    (cx - f * 5, fy - 3), (cx + f * 2, fy - 1)]
+            body = [(cx + f * 8, fy - 5), (cx + f * 3, fy - 8.5), (cx - f * 4, fy - 7.5), (cx - f * 7, fy - 5 + sw * 0.3),
+                    (cx - f * 4, fy - 2.5), (cx + f * 3, fy - 1.5)]
+            pygame.draw.polygon(surf, paint.warm(c, -0.25), [(cx - f * 6, fy - 5), (cx - f * 12, fy - 9 + sw),
+                                                             (cx - f * 11, fy - 5), (cx - f * 12, fy - 1 + sw)])
             pygame.draw.polygon(surf, c, body)
-            pygame.draw.polygon(surf, tuple(min(255, int(v * 1.15)) for v in c), body[:3] + [(cx, fy - 5)])
-            pygame.draw.polygon(surf, tuple(int(v * 0.75) for v in c),
-                                [(cx - f * 7, fy - 5), (cx - f * 12, fy - 9 + sw), (cx - f * 12, fy - 1 + sw)])
-            pygame.draw.circle(surf, (20, 20, 20), (int(cx + f * 5), int(fy - 6)), 1)
+            pygame.draw.polygon(surf, paint.warm(c, -0.2), [body[3], body[4], body[5], (cx + f * 8, fy - 5)])
+            pygame.draw.line(surf, paint.warm(c, 0.4), (cx + f * 5, fy - 6.5), (cx - f * 4, fy - 6.5), 1)
+            pygame.draw.polygon(surf, paint.shade(c, 0.5), body, 1)
+            pygame.draw.circle(surf, (20, 20, 20), (cx + f * 5, fy - 5.5), 1.1)
             return
         if self.species == "chicken":
             ph = self.walk_phase * math.tau
@@ -235,15 +238,22 @@ class Animal(Body):
             for k in (0, 1):
                 a_ = math.sin(ph + k * math.pi) * 0.5 if abs(self.vx) > 3 else 0
                 pygame.draw.line(surf, (226, 160, 50), (cx - f * 1, fy - 4), (cx - f * 1 + math.sin(a_) * 3, fy), 1)
-            body = [(cx - f * 6, fy - 8 + bob), (cx - f * 3, fy - 11 + bob), (cx + f * 3, fy - 10 + bob),
-                    (cx + f * 4, fy - 6 + bob), (cx - f * 2, fy - 4 + bob)]
-            pygame.draw.polygon(surf, c, body)
-            pygame.draw.polygon(surf, tuple(int(v * 0.85) for v in c), [body[0], body[1], (cx - f * 1, fy - 7 + bob)])
+            by = fy - 7.5 + bob
+            # tail feathers, a round body, a folded wing
+            for k, ang in enumerate((-2.2, -1.9, -1.6)):
+                paint.leaf(surf, paint.shade(c, 0.8 + 0.08 * k), cx - f * 4, by - 1, 6, ang if f > 0 else math.pi - ang, 0.3)
+            pygame.draw.ellipse(surf, paint.shade(c, 0.55), (cx - 6, by - 4.5, 12, 9))
+            pygame.draw.ellipse(surf, c, (cx - 5.5, by - 4, 11, 8))
+            pygame.draw.ellipse(surf, paint.warm(c, -0.15), (cx - 4 - f * 1, by - 1.5, 7, 4.5))
+            pygame.draw.ellipse(surf, paint.warm(c, 0.25), (cx - 3.5, by - 3.6, 5, 2.4))
             hx, hy = cx + f * (5 + peck * 2), fy - 12 + bob + peck * 7
-            pygame.draw.circle(surf, c, (int(hx), int(hy)), 3)
+            pygame.draw.line(surf, c, (cx + f * 3, by - 2), (hx, hy), 3)
+            pygame.draw.circle(surf, paint.shade(c, 0.55), (hx, hy), 3.2)
+            pygame.draw.circle(surf, c, (hx, hy), 2.7)
             pygame.draw.polygon(surf, (230, 160, 40), [(hx + f * 2, hy - 1), (hx + f * 5, hy), (hx + f * 2, hy + 1)])
-            pygame.draw.polygon(surf, (200, 40, 40), [(hx - 1, hy - 3), (hx + 1, hy - 5), (hx + 2, hy - 2)])
-            pygame.draw.circle(surf, (20, 20, 20), (int(hx + f), int(hy - 1)), 1)
+            pygame.draw.polygon(surf, (200, 40, 40), [(hx - 1, hy - 2.5), (hx + 0.5, hy - 5), (hx + 2, hy - 2)])
+            pygame.draw.circle(surf, (190, 40, 40), (hx + f * 1.5, hy + 2.5), 1.0)
+            pygame.draw.circle(surf, (20, 20, 20), (hx + f, hy - 1), 0.9)
             return
         pygame.draw.ellipse(surf, c, (cx - self.w / 2, fy - self.h, self.w, self.h))
 

@@ -80,14 +80,24 @@ class FX:
         self.flash = max(0.0, self.flash - dt * 2)
 
     def draw(self, surf, ox, oy, font_small, font_tiny):
+        from . import paint
+        W, H = surf.get_width(), surf.get_height()
         for p in self.parts:
-            x, y = int(p[0] - ox), int(p[1] - oy)
-            if -4 < x < surf.get_width() + 4 and -4 < y < surf.get_height() + 4:
+            x, y = p[0] - ox, p[1] - oy
+            if -20 < x < W + 20 and -20 < y < H + 20:
                 s = p[7]
-                if s <= 1:
-                    surf.set_at((x, y), p[6])
+                if p[8] < 0 and s >= 3:
+                    # smoke and steam: soft puffs that swell and thin out as they rise
+                    age = 1 - p[4] / max(1e-3, p[5])
+                    r = int(4 + 10 * age)
+                    a = int(110 * (1 - age))
+                    if a > 6:
+                        g = paint.glow(r, tuple((v // 24) * 24 for v in p[6]), (a // 20) * 20, 1.2)
+                        surf.blit(g, (x - r, y - r))
+                elif s <= 1:
+                    surf.set_at((int(x), int(y)), p[6])
                 else:
-                    surf.fill(p[6], (x, y, s, s))
+                    pygame.draw.circle(surf, p[6], (x, y), s * 0.75)
         for x, y, text, color, life, gloss in self.texts:
             a = min(1.0, life * 2)
             img = font_small.render(text, True, color)

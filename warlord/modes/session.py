@@ -1354,6 +1354,14 @@ class Session(WorldOps):
             e.draw(surf, ox, oy, self)
         for hf in self.formations:
             hf.draw(surf, ox, oy, self.ui.small)
+        # soft contact shadows under everyone standing on something
+        from ..gfx import paint
+        for a in self.animals:
+            if getattr(a, "on_ground", False) and not a.dead and -60 < a.cx - ox < SW + 60:
+                paint.contact_shadow(surf, a.cx - ox, a.feet - oy + 1, a.w * 1.25, 80)
+        for h in self.humanoids:
+            if h.on_ground and not h.dead and getattr(h, "mount", None) is None and -60 < h.cx - ox < SW + 60:
+                paint.contact_shadow(surf, h.cx - ox, h.feet - oy + 1, 22, 85)
         for a in self.animals:
             a.draw(surf, ox, oy)
         for h in sorted(self.humanoids, key=lambda h: (h is self.player, not h.dead)):
@@ -1399,6 +1407,7 @@ class Session(WorldOps):
             if pr.fire:
                 lights.append((pr.x, pr.y, 0.6))
         r.draw_lighting(surf, cam, env, lights)
+        r.prewarm(cam, SW, SH)
         if getattr(self, "ambient", None) is not None:
             self.ambient.draw_front(surf, ox, oy)
         self.draw_weather(surf, ox, oy)
