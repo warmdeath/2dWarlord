@@ -141,8 +141,8 @@ class WorldOps:
         wd = h.weapon_def
         key = tool or wd.key
         # a tree?
-        for t in w.near("tree_chunks", x - 60, x + 60):
-            if t.state == "stand" and abs(t.x - x) < t.tw / 2 + 10 and t.y - t.h * 0.6 < y < t.y + 4:
+        for t in w.near("tree_chunks", x - 80, x + 80):
+            if t.state == "stand" and self._on_tree(t, x, y):
                 mult = {"axt": 1.0, "hellebarde": 0.5, "schwert": 0.15, "langschwert": 0.2}.get(key, 0.08)
                 self.chop_tree(t, dmg * mult, h)
                 return True
@@ -178,7 +178,119 @@ class WorldOps:
                     "streitkolben": 0.8, "flegel": 0.5}.get(key, 0.25)
             self.damage_piece(pc, dmg * mult / max(0.3, hard), by=h)
             return True
+        # the ground itself: dig
+        if w.terrain_solid(x, y) and key in ("spitzhacke", "schaufel", "hacke", "fists") and \
+                math.hypot(x - h.cx, y - h.cy) < 100:
+            return self.dig(h, x, y, key)
         return False
+
+    # ================================================================== digging
+    SOIL_DEPTH = 70.0
+
+    def dig(self, h, x, y, tool):
+        """A pick or a shovel takes a round bite out of the ground; the earth goes into the bag."""
+        w = self.world
+        depth = y - w.surface_y(x)
+        rock = depth > self.SOIL_DEPTH + 26 * math.sin(x * 0.0061)
+        r = {"schaufel": (15, 6), "spitzhacke": (11, 10), "hacke": (9, 4), "fists": (6, 0)}[tool][1 if rock else 0]
+        if r <= 0:
+            self.ui.toast("Solid [Fels|rock]: you need a [Spitzhacke|pickaxe].", 2)
+            return True
+        area = w.dig(x, y, r)
+        if area <= 1:
+            return False
+        w.stream(self.player.cx, 2700)
+        bio = w.biome_at(int(x // TILE))
+        col = (150, 146, 140) if rock else (118, 86, 58)
+        self.fx.debris(x, y, col, 5)
+        self.fx.dust(x, y, 3, col)
+        self.sfx("hit_stone" if rock else "dig")
+        h.dug_area = getattr(h, "dug_area", 0.0) + area
+        item = "stone" if rock else ("sand" if bio in ("coast", "ocean", "islet") else "clay" if bio == "vineyard"
+                                     else "dirt")
+        while h.dug_area >= 380:
+            h.dug_area -= 380
+            if h is self.player and self.player.inv.add(item, 1):
+                self.drop_item(item, 1, x, y - 8)
+            elif h is self.player:
+                self.pickup_text(item, 1)
+        # ore next to the bite?
+        for ore in w.ores:
+            if ore["left"] > 0 and abs(ore["x"] - x) < r + 10 and abs(ore["y"] - y) < r + 10:
+                self.mine_ore(ore, 25, h)
+        # whatever stood on that ground may have lost its footing
+        self.check_footing(x, y, r)
+        if h is self.player:
+            self.emit("dig", x=x, y=y)
+        return True
+
+    def check_footing(self, x, y, r):
+        w = self.world
+        touched = set()
+        for pid in list(w.near("piece_chunks", x - r - 80, x + r + 80)):
+            pc = w.pieces.get(pid)
+            if pc is None or not pc.grounded or pc.state != "static" or pc.role in ("pier", "found"):
+                continue
+            x0, y0, x1, y1 = pc.bb
+            if x1 < x - r - 2 or x0 > x + r + 2 or abs(y1 - y) > r + 8:
+                continue
+            xs = [x0 + 2 + (x1 - x0 - 4) * k / 4 for k in range(5)]
+            if not any(w.terrain_solid(xx, y1 + 3) for xx in xs):
+                pc.grounded = False
+                touched.add(pc.bld)
+        for bid in touched:
+            b = PF.building(w, bid)
+            if b is not None and PF.settle(w, b):
+                self.camera.shake = max(self.camera.shake, 3)
+                self.sfx("collapse")
+        # trees lose their roots
+        for t in w.near("tree_chunks", x - r - 20, x + r + 20):
+            if t.state == "stand" and abs(t.x - x) < r and abs(t.y - y) < r + 6 and not w.terrain_solid(t.x, t.y + 4):
+                self.fell_tree(t)
+
+    TOOL_PREF = {"fell": ("axt", "hellebarde"), "cut": ("axt", "hellebarde"), "mine": ("spitzhacke",),
+                 "dig": ("schaufel", "spitzhacke", "hacke"), "break_wood": ("axt", "hammer", "spitzhacke"),
+                 "break": ("hammer", "spitzhacke", "streitkolben", "axt")}
+
+    def world_action(self, h, x, y):
+        """What is under the mouse that the hands can work on? -> (verb, tools, hit point) or None.
+        Trees and trunks are reached by standing next to them, wherever on them you point."""
+        w = self.world
+        for t in w.near("tree_chunks", x - 90, x + 90):
+            if t.state == "stand" and self._on_tree(t, x, y) and abs(t.x - h.cx) < t.tw / 2 + 70:
+                return "fell", self.TOOL_PREF["fell"], (t.x - h.facing * 2, min(t.y - 14, h.y + 22))
+        near_mouse = math.hypot(x - h.cx, y - h.cy) < 92
+        for o in objects_near(w, x, y, 8):
+            if o.shape is not None and o.shape.point_query((x, y)).distance < 5 and o.kind == "log" and \
+                    abs(o.x - h.cx) < 140 and abs(o.y - h.cy) < 80:
+                return "cut", self.TOOL_PREF["cut"], (x, y)
+        if not near_mouse:
+            return None
+        for ore in w.ores:
+            if ore["left"] > 0 and abs(ore["x"] - x) < 14 and abs(ore["y"] - y) < 14:
+                return "mine", self.TOOL_PREF["mine"], (x, y)
+        pc = PF.piece_at(w, x, y, solid_only=True)
+        if pc is not None:
+            v = "break_wood" if MATS[pc.mat].flammable else "break"
+            return v, self.TOOL_PREF[v], (x, y)
+        if w.terrain_solid(x, y):
+            return "dig", self.TOOL_PREF["dig"], (x, y)
+        return None
+
+    def best_tool_for(self, x, y):
+        a = self.world_action(self.player, x, y)
+        if a is None:
+            return None, None
+        verb, tools, _ = a
+        inv = self.player.inv
+        return next((t for t in tools if inv.count(t)), tools[0]), verb
+
+    @staticmethod
+    def _on_tree(t, x, y):
+        """Generous hit area: the trunk and the lower half of the crown."""
+        if abs(t.x - x) < t.tw / 2 + 12 and t.y - t.h * 0.7 < y < t.y + 6:
+            return True
+        return abs(t.x - x) < t.h * 0.22 and t.y - t.h * 0.95 < y < t.y - t.h * 0.45
 
     def damage_piece(self, pc, amount, by=None, impulse=None):
         w = self.world
@@ -771,6 +883,16 @@ class WorldOps:
         from ..items.shaping import TEMPLATES
         d = ITEMS.get(key)
         if d is None or not p.inv.count(key):
+            return None
+        if d.place == "fill" or (key in ("stone", "sand", "clay") and self.world.in_cave(x, y)):
+            if self.world.fill(x, y, 12) > 5:
+                self.world.stream(self.player.cx, 2700)
+                p.inv.remove(key, 1)
+                self.sync_held()
+                self.fx.dust(x, y, 3, (118, 86, 58))
+                self.sfx("dig")
+                return True
+            self.ui.toast("[Erde|earth] goes back into a hole you dug.", 2)
             return None
         if d.place == "seed":
             if self.sow(x, key):

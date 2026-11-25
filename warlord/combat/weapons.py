@@ -132,6 +132,8 @@ _w(key="sichel", de="Sichel", en="sickle", kind="tool", dmg=7, dtype="cut", reac
    tool_power={"axe": 1.0}, style="sickle")
 _w(key="hacke", de="Hacke", en="hoe", kind="tool", dmg=6, dtype="cut", reach=30, speed=1.1, length=24,
    tool_power={"pick": 0.8}, style="hoe", note="Turns grass into a field (Acker).")
+_w(key="schaufel", de="Schaufel", en="shovel", kind="tool", dmg=7, dtype="blunt", reach=30, speed=1.2, length=26,
+   tool_power={"pick": 1.0}, style="shovel", note="Digs earth fast, rock slowly. Throw the earth back to fill a hole.")
 _w(key="fackel", de="Fackel", en="torch", kind="torch", dmg=6, dtype="blunt", reach=30, speed=1.1, length=20,
    flags=("fire",), style="torch", note="Lights the dark — and sets thatch ablaze.")
 

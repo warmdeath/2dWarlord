@@ -30,7 +30,7 @@ def _i(key, de, en, cat, value=1, **kw):
 _i("wood", "Holz", "wood", "material", 1, color=(140, 98, 58), icon="log")
 _i("planks", "Bretter", "planks", "place", 2, place="object", color=(170, 124, 72), icon="block")
 _i("stone", "Stein", "stone", "place", 1, place="object", color=(130, 128, 124), icon="block")
-_i("dirt", "Erde", "earth", "place", 0, place="object", color=(112, 78, 52), icon="block")
+_i("dirt", "Erde", "earth", "place", 0, place="fill", color=(112, 78, 52), icon="block")
 _i("sand", "Sand", "sand", "place", 0, place="object", color=(214, 192, 132), icon="block")
 _i("clay", "Lehm", "clay", "material", 1, color=(160, 104, 80), icon="lump")
 _i("brick", "Mauerstein", "stone brick", "place", 4, place="object", color=(150, 146, 136), icon="block")
@@ -116,7 +116,7 @@ _i("boat", "Boot", "boat", "mount", 120, stack=1, color=(140, 100, 60), icon="bo
 _i("horse", "Pferd", "horse", "mount", 90, stack=1, color=(120, 80, 50), icon="horse")
 
 # weapons / tools
-VALUES = {"hacke": 6, "fists": 0, "knueppel": 4, "schwert": 60, "langschwert": 110, "dolch": 20, "axt": 30, "streitkolben": 55,
+VALUES = {"schaufel": 6, "hacke": 6, "fists": 0, "knueppel": 4, "schwert": 60, "langschwert": 110, "dolch": 20, "axt": 30, "streitkolben": 55,
           "flegel": 10, "mistgabel": 8, "speer": 22, "spiess": 35, "hellebarde": 70, "lanze": 50, "bogen": 30,
           "armbrust": 80, "spitzhacke": 18, "hammer": 10, "sichel": 8, "fackel": 2}
 for wk, wd in WEAPONS.items():
@@ -153,7 +153,7 @@ _i("iron_bar", "Eisenstange", "iron bar", "material", 12, color=(150, 154, 160),
 _i("chip", "Späne", "wood chips", "material", 0, color=(196, 160, 108), icon="lump")
 
 # how heavy things are in the bag (kg); big things cannot go in the bag at all, you carry them in your arms
-WEIGHT = {"wood": 2.0, "log": 12.0, "beam": 6.0, "planks": 1.0, "stone": 2.5, "brick": 2.5, "clay": 1.5,
+WEIGHT = {"dirt": 1.0, "sand": 1.0, "chip": 0.05, "wood": 2.0, "log": 12.0, "beam": 6.0, "planks": 0.8, "stone": 1.5, "brick": 2.0, "clay": 1.0,
           "straw": 0.3, "rooftile": 0.8, "slate": 0.8, "fachwerk": 3.0, "palisade": 4.0, "door": 9.0,
           "ladder": 6.0, "platform": 1.0, "iron_ore": 2.0, "silver_ore": 2.0, "gold_ore": 2.0, "coal": 0.6,
           "iron_ingot": 1.5, "iron_bar": 1.5, "silver_coin": 0.0, "stake": 3.0, "spike": 3.0, "wheel": 5.0,

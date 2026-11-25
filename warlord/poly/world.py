@@ -221,7 +221,53 @@ class PolyWorld:
         i = max(0, min(self.w, int(px // TILE)))
         return float(self.bottom[i])
 
+    def dug_at(self, cx):
+        d = getattr(self, "dug", None)
+        if d is None:
+            self.dug = d = {}
+        return d.get(cx)
+
+    def dig(self, x, y, r):
+        """Take a round bite out of the ground (a pick, a shovel, a sapper). Returns the area removed."""
+        from shapely.geometry import Point
+        from shapely.ops import unary_union
+        if getattr(self, "dug", None) is None:
+            self.dug = {}
+        hole = Point(x, y).buffer(r, quad_segs=4)
+        removed = 0.0
+        for cx in range(int((x - r) // CHUNK_PX), int((x + r) // CHUNK_PX) + 1):
+            part = hole.intersection(box(cx * CHUNK_PX, -10000, (cx + 1) * CHUNK_PX, 100000))
+            if part.is_empty:
+                continue
+            ground = self.chunk_geometry(cx)
+            if ground is not None:
+                removed += ground.intersection(part).area
+            old = self.dug.get(cx)
+            self.dug[cx] = part if old is None else unary_union([old, part]).simplify(0.4)
+            self._invalidate(cx)
+        return removed
+
+    def fill(self, x, y, r):
+        """Put earth back into a dug hole."""
+        from shapely.geometry import Point
+        d = getattr(self, "dug", None) or {}
+        hole = Point(x, y).buffer(r, quad_segs=4)
+        filled = 0.0
+        for cx in range(int((x - r) // CHUNK_PX), int((x + r) // CHUNK_PX) + 1):
+            g = d.get(cx)
+            if g is None:
+                continue
+            filled += g.intersection(hole).area
+            d[cx] = g.difference(hole)
+            self._invalidate(cx)
+        return filled
+
     def in_cave(self, px, py):
+        d = getattr(self, "dug", None)
+        if d:
+            g = d.get(int(px // CHUNK_PX))
+            if g is not None and not g.is_empty and contains_xy(g, px, py):
+                return True
         for ci in self.cave_chunks.get(int(px // CHUNK_PX), ()):
             x0, y0, x1, y1 = self.cave_bounds[ci]
             if x0 <= px <= x1 and y0 <= py <= y1 and contains_xy(self.caves[ci], px, py):
@@ -371,6 +417,9 @@ class PolyWorld:
         clip = box(x0 - 1, -10000, x1 + 1, 100000)
         for ci in self.cave_chunks.get(cx, ()):
             geom = geom.difference(self.caves[ci].intersection(clip))
+        d = getattr(self, "dug", None)
+        if d and d.get(cx) is not None:
+            geom = geom.difference(d[cx])
         self._chunk_geom[cx] = geom
         return geom
 

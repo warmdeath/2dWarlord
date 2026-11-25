@@ -122,11 +122,16 @@ def compute_pose(h):
         p.faf = p.fab = 0.2
         p.weapon_mode = "sheathed"
     elif st == "ride":
-        p.thf, p.shf = 1.35, -1.45
-        p.thb, p.shb = 1.2, -1.45
-        p.hip_y = -(THIGH + SHIN) * 0.25
-        p.bob = math.sin(h.walk_phase * 2) * 1.5
-        p.lean = 0.1
+        # astride: thighs down and forward around the barrel, lower legs back to the stirrups
+        gallop = abs(h.vx) > 150
+        p.thf, p.shf = 0.85, -1.05
+        p.thb, p.shb = 0.7, -1.0
+        p.hip_y = -(THIGH + SHIN) * 0.8
+        p.bob = 0.0
+        p.lean = 0.32 if gallop else 0.12
+        # both hands on the reins, low over the withers
+        p.uaf, p.faf = 0.95, 0.75
+        p.uab, p.fab = 0.8, 0.85
     elif st in ("sit",):
         p.thf, p.shf = 1.5, -1.5
         p.thb, p.shb = 1.4, -1.5
@@ -749,21 +754,34 @@ def _draw_weapon(surf, wd, a, b, f, S, sheathed=False, draw=0.0, h=None, hand2=N
             if st == "pike" and h is not None and h.look.get("tabard"):
                 pygame.draw.polygon(surf, h.look["tabard"][0], [at(0.84, 0), at(0.8, 6), at(0.76, 0)])
     elif st == "bow":
-        top = (ax, ay - 15 * S)
-        bot = (ax, ay + 15 * S)
-        bend = (ax + f * 6 * S, ay)
-        pygame.draw.lines(surf, WOOD, False, [top, (ax + f * 4 * S, ay - 9 * S), bend, (ax + f * 4 * S, ay + 9 * S),
-                                              bot], 3)
-        pull = (ax - f * draw * 12 * S, ay)
+        # the bow stands across the line of the shot: it tilts with the aim
+        act = getattr(h, "action", None) if h is not None else None
+        aim = act.get("aim", 0.0) if act and act.get("kind") == "bow" else 0.35
+        fx, fy_ = f * math.cos(aim), math.sin(aim)          # direction of the arrow
+        ux, uy = fy_, -fx                                   # along the stave
+        if uy > 0:
+            ux, uy = -ux, -uy
+
+        def B(along, fwd):
+            return (ax + ux * along * S + fx * fwd * S, ay + uy * along * S + fy_ * fwd * S)
+        top, bot = B(15, 0), B(-15, 0)
+        pygame.draw.lines(surf, WOOD, False, [top, B(9, 4), B(0, 6), B(-9, 4), bot], 3)
+        pull = B(0, -draw * 12)
         pygame.draw.line(surf, (230, 230, 220), top, pull, 1)
         pygame.draw.line(surf, (230, 230, 220), pull, bot, 1)
         if draw > 0.05:
-            pygame.draw.line(surf, (200, 190, 170), pull, (ax + f * 12 * S, ay), 1)
+            pygame.draw.line(surf, (200, 190, 170), pull, B(0, 12), 1)
+            tip = B(0, 12)
+            pygame.draw.polygon(surf, (200, 200, 206), [tip, B(1.5, 9), B(-1.5, 9)])
     elif st == "crossbow":
         quad(surf, at(-0.3), at(0.9), 1.8 * S, 1.6 * S, WOOD)
         pygame.draw.lines(surf, (90, 90, 96), False, [at(0.8, -9), at(0.88, 0), at(0.8, 9)], 2)
         pygame.draw.line(surf, (220, 220, 210), at(0.8, -9), at(0.5), 1)
         pygame.draw.line(surf, (220, 220, 210), at(0.8, 9), at(0.5), 1)
+    elif st == "shovel":
+        quad(surf, at(-0.1), at(0.8), 1.2 * S, 1.1 * S, WOOD)
+        pygame.draw.polygon(surf, STEEL, [at(0.78, -3.5), at(1.04, -3), at(1.1, 0), at(1.04, 3), at(0.78, 3.5)])
+        pygame.draw.polygon(surf, STEEL_HI, [at(0.78, -3.5), at(1.04, -3), at(1.1, 0), at(0.78, 0)])
     elif st in ("pick", "hammer", "sickle", "hoe", "scythe"):
         quad(surf, at(-0.1), at(1.0), 1.2 * S, 1.1 * S, WOOD)
         if st == "pick":

@@ -137,3 +137,17 @@ Bugs this round's test runs caught:
 Limits: physics runs only within about 2 700 px of the player; farther away the world is data. NPCs walk,
 jump small obstacles and open doors, but don't plan routes up ladders. Shaping matches against a fixed
 library of forms; anything else is a Rohling you can place but not use as a tool.
+
+### Round 3, after the first play
+
+- **The world felt inert** because the hands only worked when you held the exact right tool and pointed at the
+  exact trunk pixel within 92 px. Now you point anywhere on a tree while standing next to it, hold the mouse,
+  and the right tool comes out of the bag by itself; a line above the belt says what the click will do. You can
+  **dig** — a shovel for earth, a pick for rock — straight down if you like; the earth goes into the bag and
+  can fill a hole again, and walls lose their footing when you dig under them.
+- **Riding:** the rider sat inside the new, taller horse. The seat now comes from the horse's skeleton; the rider
+  sits astride with legs to the stirrups and both hands on the reins when empty-handed.
+- **Bow:** the bow stayed upright whatever you aimed at. It now tilts across the line of the shot, the archer
+  turns to the mouse, and a dotted arc shows the flight. Keyboard archery: hold J, W/S raise or lower the bow
+  (Shift for fine aim), A/D turn, release to shoot.
+- **Planks:** the workbench rips a straight log into boards: about six planks per felled oak.

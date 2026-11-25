@@ -23,6 +23,8 @@ that topple on their stumps, and wood you **shape by hand** into doors, stakes, 
 | ![drawbridge](docs/screenshots/42_moat_drawbridge.jpg) | ![raised](docs/screenshots/43_drawbridge_raised.jpg) |
 | ![cave](docs/screenshots/34_cave_ore.jpg) | ![night](docs/screenshots/33_village_night.jpg) |
 | ![forest](docs/screenshots/32_forest.jpg) | ![rucksack](docs/screenshots/39_rucksack.jpg) |
+| ![digging](docs/screenshots/47_digging.jpg) | ![riding](docs/screenshots/49_riding.jpg) |
+| ![bow arc](docs/screenshots/48_bow_arc.jpg) | ![bow keys](docs/screenshots/50_bow_keys.jpg) |
 
 ![animals](docs/screenshots/44_animals.jpg)
 
@@ -55,12 +57,14 @@ Python 3.10+. Classic `pygame` 2.x also works. F11 toggles fullscreen, F3 shows 
 | Key | Action |
 |---|---|
 | A / D, Shift, S, Space, W | walk, run, crouch (run + crouch = slide), jump, climb / swim up |
-| Left mouse / J | attack — the move depends on your state (see Combat) · with a tool or weapon on a **tree, trunk, wall or ore vein**: swing at it |
+| Left mouse / J | attack — the move depends on your state (see Combat) |
+| Hold left mouse on the world | **fell a tree** (point anywhere on it while standing next to it), **cut a trunk**, **dig** into the ground (straight down if you like), mine ore, break walls — the right tool from your bag is taken automatically, and a hint above the belt says what will happen |
+| Bow | **mouse:** point, hold left to draw, release; a dotted arc shows where the arrow will fly · **keys:** hold J to draw, W/S raise and lower the bow (Shift for fine aim), A/D turn, release J to shoot · crossbow: hold J to aim, release to loose |
 | Right mouse / K | block — tap it just before a hit lands to **parry** |
 | E | pick up (small things go in the bag, big ones into your arms) · set down · doors and gates · chests · beds · **Werkbank** · talk · mount · board · harvest · pray · signposts · winch · pitch |
 | Carrying | left click: set it down where you point · **Shift + click: fix it in place** (a door in a frame, stakes as a barrier, a plank bridge, a ladder) · R rotate · G throw |
 | C | **shape the log at your feet**: Q / E choose a form, drag axe strokes along the dashed lines, Enter when done |
-| 1–4 / mouse wheel | belt · Q drop · T cycle shield / armour / helmet · V fire arrows · click with a Verband to bind wounds, with a Hacke to till, with Mist to manure, with a Sichel to reap |
+| 1–4 / mouse wheel | belt · Q drop · T cycle shield / armour / helmet · V fire arrows · click with a Verband to bind wounds, with a Hacke to till, with Mist to manure, with a Sichel to reap, with Erde to fill a hole |
 | I · B · M · N · R | the Rucksack & crafting · blueprints · world map · Wörterbuch (Q = quiz) · Ständeordnung |
 | X · Tab · Z | formation orders · select formation · commander's zoomed-out view |
 | F5 / F9 · Esc · H | save / load · pause · help |
@@ -90,13 +94,17 @@ Python 3.10+. Classic `pygame` 2.x also works. F11 toggles fullscreen, F3 shows 
   - **Break structures.** Hammers and picks bite into walls, axes into timber; trebuchet stones and rams knock
     pieces out.
   - **Place what you made**, loose (it falls and settles) or fixed in place.
+  - **Dig.** A Schaufel (shovel) bites quickly into earth, a Spitzhacke into rock; the earth goes into your bag
+    and can be thrown back into a hole. Dig under a wall and it loses its footing.
   - **Go underground** with a torch and a pick.
 - **Shaping wood (procedural crafting).** You don't choose "door" from a menu; you cut one out of a piece of
   wood. A Werkstück is a polygon. *In the field*, press C at a log: the target shape is laid over it as dashed
   guide lines, and you make axe strokes along them with the mouse — fast strokes wobble, practice steadies your
   hand. *At a Werkbank* you work slowly and exactly: the **Säge** cuts straight through along a line you drag
   (Shift snaps to the guide), the **Beitel** carves grooves (the rungs of a ladder, the hollow of a trough), the
-  **Bohrer** drills holes, the **Raspel** rounds edges, with undo. The result is compared with a library of known
+  **Bohrer** drills holes, the **Raspel** rounds edges, with undo. **Spalten** (key 5) rips a straight log
+  lengthwise into boards — one board per hand-width (4 px) of trunk after the bark, one Brett per 48 px of length,
+  so a whole felled oak gives about six planks and a half trunk two. The result is compared with a library of known
   forms — Brett, Balken, Pfahl, Spitzpfahl, Tür, Keil, Stiel, Schaft, Knüppel, Schild, Rad, Rundschild, Leiter,
   Schemel, Schale, Trog — and the best fit and how closely you matched it decide what you made and its quality
   (Güte). Offcuts that happen to match a form are kept too. Anything that matches nothing is a *Rohling*, still a
@@ -106,7 +114,9 @@ Python 3.10+. Classic `pygame` 2.x also works. F11 toggles fullscreen, F3 shows 
   doors, ladders and beams don't fit in any bag — you carry them in your arms.
 - **Animals with skeletons.** Horses, cattle, sheep, pigs, deer, boar, wolves and bears have four two-bone legs
   solved by inverse kinematics and real gaits — a four-beat walk, a diagonal trot, a rotary gallop with
-  suspension. Hind legs fold at the hock, the body rocks, the neck nods, herd animals graze, horses wear saddle,
+  suspension. Riders sit astride in the saddle, legs down to the stirrups, both hands on the reins when they
+  carry nothing (one hand when armed), leaning into the gallop. Hind legs fold at the hock, the body rocks, the
+  neck nods, herd animals graze, horses wear saddle,
   blanket and bridle.
 - **Ragdolls with joints.** The fallen become chains of rigid bones pinned at the joints with rotation limits;
   they drape over walls and logs and are frozen into still poses after a while to keep big battles cheap.

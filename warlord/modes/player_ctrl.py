@@ -40,6 +40,12 @@ class PlayerController:
         self.place_angle = 0.0
         self.shaping = None
         self.pending_hit = None
+        self.hint = None
+        self.aim_mode = "mouse"
+        self.key_aim = -0.15
+        self.last_mouse = None
+        self.tool_t = 0.0
+        self.need_t = 0.0
 
     # ------------------------------------------------------------------ input
     def handle(self, dt, keys, mouse_buttons, mouse_pos, events):
@@ -98,11 +104,45 @@ class PlayerController:
                 it.attack = True
         dx = wx - p.cx
         dy = wy - (p.y + 14)
+        self.hint = None
+        if mouse_pos != self.last_mouse:
+            if self.last_mouse is not None:
+                self.aim_mode = "mouse"
+            self.last_mouse = mouse_pos
         if p.weapon_def.kind in ("bow", "crossbow") and getattr(p, "carrying", None) is None:
-            if (lmb or it.attack) and dx != 0:
-                p.facing = 1 if dx > 0 else -1
-            it.aim = max(-1.4, min(1.1, math.atan2(dy, abs(dx) + 0.001)))
-            it.attack_held = lmb or keys[pygame.K_j]
+            jkey = keys[pygame.K_j]
+            if jkey or any(e.type == pygame.KEYDOWN and e.key == pygame.K_j for e in events):
+                self.aim_mode = "keys"
+            if lmb:
+                self.aim_mode = "mouse"
+            if self.aim_mode == "keys":
+                # keyboard archery: hold J to draw, W/S (or the arrow keys) raise and lower the bow, A/D turn
+                up = keys[pygame.K_w] or keys[pygame.K_UP]
+                down = keys[pygame.K_s] or keys[pygame.K_DOWN]
+                if p.weapon_def.kind == "crossbow":
+                    # the crossbow is spanned already: hold J to aim, release to loose the bolt
+                    it.attack = any(e.type == pygame.KEYUP and e.key == pygame.K_j for e in events)
+                if jkey:
+                    rate = 1.1 if not keys[pygame.K_LSHIFT] else 0.35      # Shift: fine aim
+                    self.key_aim += ((1 if down else 0) - (1 if up else 0)) * rate * dt
+                    self.key_aim = max(-1.45, min(1.2, self.key_aim))
+                    if jkey:
+                        it.up = it.down = it.crouch = False
+                        it.jump_held = False
+                        if it.mx:
+                            p.facing = 1 if it.mx > 0 else -1
+                            it.mx = 0                 # turning, not walking, while the string is drawn
+                it.aim = self.key_aim
+                it.attack_held = jkey
+                self.hint = "J halten: zielen/spannen · W/S: höher/tiefer (Shift fein) · A/D: drehen · loslassen: Schuss"
+            else:
+                # mouse archery: the bow points where the mouse points, and you turn to face it
+                if abs(dx) > 4:
+                    p.facing = 1 if dx > 0 else -1
+                it.aim = max(-1.45, min(1.2, math.atan2(dy, abs(dx) + 0.001)))
+                self.key_aim = it.aim
+                it.attack_held = lmb
+                self.hint = "Maus: zielen · Linksklick halten: spannen, loslassen: Schuss · or J + W/S"
             if lmb and clicked:
                 it.attack = True
         # boat
@@ -153,14 +193,41 @@ class PlayerController:
                 p.action = {"kind": "use", "t": 0.0, "dur": 0.35}
                 return
         wd = p.weapon_def
-        # swinging at the world: trees, logs, walls, ore
-        if lmb and in_reach and wd.kind in ("tool", "melee") and self.swing_cd <= 0 and self.world_target(wx, wy):
-            p.facing = 1 if dx > 0 else -1
-            p.action = {"kind": "use", "t": 0.0, "dur": 0.42 / max(0.5, wd.speed)}
-            self.swing_cd = 0.5 / max(0.5, wd.speed)
-            self.pending_hit = [0.22 / max(0.5, wd.speed), wx, wy]
-            g.sfx("swing")
-        elif lmb and wd.kind in ("melee", "tool", "torch") and clicked:
+        # what is under the mouse, and what would you use on it?
+        act = g.world_action(p, wx, wy) if wd.kind not in ("bow", "crossbow") else None
+        if act is not None and wd.kind == "melee" and self.enemy_near():
+            act = None            # in a fight, a click is a blow, not woodwork
+        self.tool_t = max(0.0, self.tool_t - dt)
+        if act is not None:
+            verb, tools, (hx, hy) = act
+            owned = [t_ for t_ in tools if p.inv.count(t_)]
+            ok = wd.key in tools
+            names = {"fell": "Baum fällen (fell the tree)", "cut": "Stamm zerteilen (cut the trunk)",
+                     "mine": "Erz abbauen (mine)", "break": "abreißen (break)", "break_wood": "abreißen (break)",
+                     "dig": "graben (dig)"}
+            if ok:
+                self.hint = f"Linksklick halten: {names[verb]}"
+            elif owned:
+                self.hint = f"Linksklick: {names[verb]} — mit {ITEMS[owned[0]].de}"
+            else:
+                self.hint = f"{names[verb]}: you need a {ITEMS[tools[0]].de} ({ITEMS[tools[0]].en})"
+            # smart tool: reach for the right tool when you click the world (not in the middle of a fight)
+            if lmb and not ok and owned and not self.enemy_near():
+                self.equip_tool(owned[0])
+                wd = p.weapon_def
+                ok = True
+            if lmb and self.swing_cd <= 0 and (ok or (clicked and verb == "dig" and wd.key == "fists")):
+                p.facing = 1 if hx > p.cx else -1
+                p.action = {"kind": "use", "t": 0.0, "dur": 0.42 / max(0.5, wd.speed)}
+                self.swing_cd = 0.5 / max(0.5, wd.speed)
+                self.pending_hit = [0.22 / max(0.5, wd.speed), hx, hy]
+                g.sfx("swing")
+            elif lmb and not ok and clicked and not owned:
+                if self.need_t <= 0:
+                    self.need_t = 3.0
+                    g.ui.toast(f"You need a [{ITEMS[tools[0]].de}|{ITEMS[tools[0]].en}] for that.", 2.5)
+            self.need_t = max(0.0, self.need_t - dt)
+        if act is None and lmb and wd.kind in ("melee", "tool", "torch") and clicked:
             p.facing = 1 if dx > 0 else -1
             it.attack = True
             if wd.kind == "torch" and in_reach:
@@ -173,6 +240,33 @@ class PlayerController:
                 dmg = max(8.0, wd.dmg) * (0.5 + 0.5 * p.stamina / max(1, p.max_stamina))
                 p.stamina = max(0.0, p.stamina - 4)
                 g.hit_world(p, hx, hy, dmg, wd.dtype if hasattr(wd, "dtype") else "cut")
+
+    @staticmethod
+    def suits(key, verb):
+        return {"fell": key in ("axt", "hellebarde"), "cut": key in ("axt", "hellebarde"),
+                "mine": key == "spitzhacke", "dig": key in ("schaufel", "spitzhacke", "hacke"),
+                "break": key in ("hammer", "spitzhacke", "axt", "streitkolben")}.get(verb, False)
+
+    def enemy_near(self):
+        g = self.game
+        p = g.player
+        return any(not h.dead and h is not p and g.hostile(p, h) and abs(h.cx - p.cx) < 260
+                   for h in g.humanoids) or any(not a.dead and a.behaviour in ("predator", "aggressive") and
+                                                abs(a.cx - p.cx) < 200 for a in g.animals)
+
+    def equip_tool(self, key):
+        g = self.game
+        inv = g.player.inv
+        if key in inv.belt:
+            inv.selected = inv.belt.index(key)
+        else:
+            # take a free belt hook, or swap out whatever is not a weapon
+            slot = inv.belt.index(None) if None in inv.belt else next(
+                (i for i, k in enumerate(inv.belt) if k and ITEMS[k].cat not in ("weapon",)), inv.selected)
+            inv.belt[slot] = key
+            inv.selected = slot
+        g.sync_held()
+        g.fx.text(g.player.cx, g.player.y - 18, ITEMS[key].de, (240, 220, 170), gloss=ITEMS[key].en, life=0.8)
 
     def world_target(self, x, y):
         """Is there something of the world under the mouse to swing at?"""
@@ -329,10 +423,50 @@ class PlayerController:
             s.obj.attach(self.game.world)
 
     # ------------------------------------------------------------------ drawing (placement preview, guides)
+    def draw_trajectory(self, surf, ox, oy):
+        """Where the arrow will fly, as a dotted arc (gravity, wind and draw strength included)."""
+        g = self.game
+        p = g.player
+        wd = p.weapon_def
+        act = p.action
+        if wd.kind == "bow":
+            if act is None or act.get("kind") != "bow":
+                return
+            draw = act.get("draw", 0.0)
+            speed, grav, wk = 320 + 600 * draw, 520.0, 70.0
+        elif wd.kind == "crossbow":
+            if self.aim_mode == "keys" and not pygame.key.get_pressed()[pygame.K_j]:
+                return
+            speed, grav, wk = 950.0, 300.0, 30.0
+            draw = 1.0
+        else:
+            return
+        if g.env.is_raining() and wd.kind == "bow":
+            speed *= 0.85
+        aim = act.get("aim", p.intent.aim) if act else p.intent.aim
+        f = p.facing
+        x, y = p.cx + f * 10, p.y + 14
+        vx, vy = math.cos(aim) * speed * f, math.sin(aim) * speed
+        w = g.world
+        dt = 1 / 30
+        a = 90 + int(120 * draw)
+        for i in range(45):
+            vy += grav * dt
+            vx += g.env.wind * wk * dt
+            x += vx * dt
+            y += vy * dt
+            if w.solid_point(x, y):
+                pygame.draw.circle(surf, (255, 220, 150), (int(x - ox), int(y - oy)), 4, 1)
+                break
+            if i % 2 == 0:
+                pygame.draw.circle(surf, (255, 240, 200) if i < 30 else (200, 190, 170), (int(x - ox), int(y - oy)),
+                                   2 if i < 20 else 1)
+
     def draw_world(self, surf, ox, oy):
         g = self.game
         p = g.player
         wx, wy = self.mouse_world
+        self.draw_trajectory(surf, ox, oy)
         if self.shaping is not None:
             s = self.shaping
             o = s.obj

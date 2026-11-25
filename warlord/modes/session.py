@@ -137,7 +137,8 @@ class Session(WorldOps):
             self.player.equip(weapon="fists")
             return
         for k, n in (("schwert", 1), ("axt", 1), ("hammer", 1), ("bogen", 1), ("arrow", 30), ("torch", 4),
-                     ("bread", 5), ("seeds", 10), ("holzschild", 1), ("verband", 3), ("spitzhacke", 1)):
+                     ("bread", 5), ("seeds", 10), ("holzschild", 1), ("verband", 3), ("spitzhacke", 1),
+                     ("schaufel", 1)):
             inv.add(k, n, force=True)
         inv.belt = ["schwert", "axt", "hammer", "bogen"]
         inv.selected = 0
@@ -1359,6 +1360,14 @@ class Session(WorldOps):
             sx, sy = h.cx - ox, h.feet - oy
             if -60 < sx < SW + 60 and -80 < sy < SH + 80:
                 draw_humanoid(surf, h, sx, sy)
+                m = getattr(h, "mount", None)
+                if m is not None and getattr(m, "_bit", None) is not None and not h.dead:
+                    from ..gfx.rig import world_joints
+                    J = world_joints(h)
+                    hands = ("hb", "hf") if h.weapon_key == "fists" else ("hb",)
+                    for k_ in hands:
+                        hx, hy = J[k_]
+                        pygame.draw.line(surf, (70, 46, 28), (hx - ox, hy - oy), m._bit, 1)
                 if getattr(h, "carrying", None) is not None:
                     self.draw_carried(surf, h, ox, oy)
         r.draw_grass(surf, cam, env.time, env.wind)
