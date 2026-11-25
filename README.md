@@ -16,6 +16,11 @@ while every NPC speaks a mix of English and **German** you can learn from (every
 | ![dialogue](docs/screenshots/04_dialogue.jpg) | ![sailing](docs/screenshots/07_sailing_storm.jpg) |
 | ![edge](docs/screenshots/09_edge_of_the_world.jpg) | ![stand](docs/screenshots/05_standeordnung.jpg) |
 | ![mine](docs/screenshots/08_silver_mine_night.jpg) | ![fire](docs/screenshots/11_village_fire.jpg) |
+| ![tower city](docs/screenshots/14_hochburg_tower_city.jpg) | ![brick gables](docs/screenshots/15_luebenau_stepped_gables.jpg) |
+| ![siege](docs/screenshots/20_siege.jpg) | ![sapping](docs/screenshots/19_sapping_collapse.jpg) |
+| ![winter](docs/screenshots/16_winter_walkway.jpg) | ![longhouses](docs/screenshots/18_frostholm_longhouses.jpg) |
+
+![low-poly rig](docs/screenshots/21_lowpoly_rig.jpg)
 
 ## Run it
 
@@ -35,8 +40,9 @@ Python 3.10+. Classic `pygame` 2.x also works. F11 toggles fullscreen, F3 shows 
   world, through the free city of Lübenau ("Stadtluft macht frei"), squire, knighthood, a voyage across the Grey
   Sea, a great battle and the election of the Kaiser — and why the Abyss keeps growing.
 - **Sandkasten** (Sandbox) — the open world in three sizes (15 / 30 / 60 minutes of riding end to end).
-- **Feldschlacht** (Field battle) — four set pieces: hold a ford, defend a mountain gate, an open battle of
-  knights vs. pikes, and storming a robber knight's castle.
+- **Feldschlacht** (Field battle) — five set pieces: hold a ford, defend a mountain gate, an open battle of
+  knights vs. pikes, storming a castle with engines, ladders and sappers, and defending one against powder
+  guns.
 
 ## Controls
 
@@ -45,8 +51,8 @@ Python 3.10+. Classic `pygame` 2.x also works. F11 toggles fullscreen, F3 shows 
 | A / D, Shift, S, Space, W | walk, run, crouch (run + crouch = slide), jump, climb / swim up |
 | Left mouse / J | attack — the move depends on your state (see Combat) · mine / place / eat with tools, blocks, food |
 | Right mouse / K | block — tap it just before a hit lands to **parry** |
-| E | talk, doors and gates, chests, beds, mount a horse, board a boat, harvest, pray, read signposts |
-| 1–0 / mouse wheel | hotbar · Q drop · T cycle shield / armour / helmet · V fire arrows |
+| E | talk, doors and gates, chests, beds, mount a horse, board a boat, harvest, pray, read signposts, winch, pour pitch, start/stop a siege engine |
+| 1–0 / mouse wheel | hotbar · Q drop · T cycle shield / armour / helmet · V fire arrows · click with a Verband to bind wounds, with a Hacke to till, with Mist to manure |
 | I · B · M · N · R | inventory & crafting · blueprints · world map · Wörterbuch (Q = quiz) · Ständeordnung |
 | C · Tab · Z | formation orders · select formation · commander's zoomed-out view |
 | F5 / F9 · Esc · H | save / load · pause · help |
@@ -84,6 +90,27 @@ Python 3.10+. Classic `pygame` 2.x also works. F11 toggles fullscreen, F3 shows 
   dig out a wall's foundation and it collapses (sapping).
 - **The sea:** buy a *Kogge* (cog) in a port. Wind from behind fills the sail; against it you crawl or row. A
   full sail in a storm can capsize you. Swimming has buoyancy and breath, and heavy armour drags you down.
+- **Every realm builds its own way:**
+  - Hochburg's master builders stack their towns into **tower-houses joined by plank bridges** (a vertical
+    city, like the patrician towers of Regensburg).
+  - Lübenau builds in red brick with **stepped gables** (Backsteingotik).
+  - Randmark **chains its houses to iron stakes**, because the crumbling edge takes whatever isn't anchored.
+  - Waldheim builds log houses and keeps smoking charcoal kilns.
+  - Frostholm lives in **turf-roofed longhouses**.
+  - Glutmark half-buries **basalt houses** behind earth berms against the heat.
+- **A world that has adapted:** villages lay **raised walkways over their fields**, because running feet and
+  hooves trample the crops. **Stone bridges** cross lakes, **timber trestles** span mountain ravines, and
+  vineyards are cut into terraces.
+- **Farming:**
+  - Crops: wheat, **rye** (the winter grain of the north), oats, flax (for linen) and turnips, each with its own
+    growing seasons.
+  - Soil fertility: every harvest tires the soil, fallow land (*Brache*) recovers, and manure restores it.
+    Farmers practise crop rotation by leaving tired fields fallow.
+  - Working the land: till with a hoe, or plough behind your horse (hold S while riding with a *Pflug*). Frost
+    kills summer crops.
+- **Seasons and life:** spring blossom, autumn colours and falling leaves, winter snow on every roof and bare
+  trees. You'll also see birch woods, ferns, reeds by the water, heather, glacial boulders, flocks of birds,
+  butterflies, fireflies on summer nights, and smoke from chimneys and kilns.
 - **Building and crafting:** mine and place single tiles, Terraria-style, or use **blueprints** (huts, burgher
   houses, smithies, mills, wells, walls, gates, watchtowers, chapels, knights' halls, a whole castle) that
   builders raise tile by tile. About 60 recipes at the Werkbank, Amboss + Esse, Ofen and Webstuhl.
@@ -109,6 +136,56 @@ but are clumsy up close · the halberd hooks riders off their horses · the flai
 with the mouse and drift on the wind (rain wets the string) · crossbows are slow but punch through mail · torches
 light the dark and set thatch on fire. Armour (gambeson, mail, coat of plates) protects differently against cut,
 pierce and blunt, and slows you down.
+
+### Bodies, wounds and armour
+
+Characters are **modular low-poly skeletons**: tapered, two-tone limbs on bones, driven by layered poses
+(legs move, arms act, and the two blend smoothly). When someone dies, the same skeleton becomes a **verlet
+ragdoll** that tumbles down slopes and settles on the tiles, and soldiers falling out of formation ranks do
+the same.
+
+Every hit lands on a **body part**, depending on the height of the blow, and armour protects only the parts it
+covers, with a **hardness**:
+
+| | head | torso | arms | legs |
+|---|---|---|---|---|
+| Gambeson (padded) | – | 2 | 2 | – |
+| Kettenhemd (mail) | – | 5 | 5 | 4 |
+| Plattenrock (plates) | – | 8 | 5 | 5 |
+| Kettenhaube / Eisenhut / Beckenhaube / Topfhelm | 5 / 7 / 8 / 9 | | | |
+
+Each weapon has a **penetration** value (sword 4, axe 5, dagger 6, bodkin arrow 5, crossbow bolt 8, powder ball
+11). A cut that can't beat the hardness glances off ("Abgeprallt!"). Blunt weapons are the exception: padding
+only softens them. As a result a sword does about 10% against plate, a mace about 75%, and a crossbow bolt goes
+straight through mail. Wounds **bleed** until you bandage them (*Verband*):
+- a wounded leg makes you limp (no running, then no jumping);
+- a wounded sword arm weakens your blows, and a severe wound makes you drop the weapon;
+- a wounded shield arm makes you drop the shield;
+- head trauma dazes you, and a third head wound knocks you out.
+
+Wounds heal with rest, or a priest or monk can tend them for a donation. The HUD shows a small body diagram.
+
+## Sieges (Belagerung)
+
+This is warfare against the tile world itself, so the physics decides what stands and what falls.
+
+- **Defences:** fortified castles have a **Graben** (moat), a **Zugbrücke** (drawbridge) and an iron
+  **Fallgatter** (portcullis), plus open fighting tops on the towers and **Pechnasen** (machicolations). The
+  defenders raise the bridge and drop the portcullis when an enemy comes near, and pour **boiling pitch** on
+  whatever reaches the gate. You can do the same with E at the winch or the Pechnase.
+- **Ramps:** soldiers stuck in a moat shovel earth in front of them until they can climb out, so a moat is
+  literally filled with men's work.
+- **Sturmleitern:** ladder men raise real ladder tiles against the wall and climb one by one. A defender at the
+  top can **shove the ladder away**. If the attackers hold the wall long enough, they open the gate from inside.
+- **Mineure (sappers):** they dig a real tunnel, swap the wall's foundation for timber props, then set the props
+  on fire. Masonry can arch over a 2-tile gap, but not over 3, so the wall collapses.
+- **Engines:** the *Rammbock* (ram under a hide roof), the *Blide* (counterweight trebuchet throwing stones that
+  break masonry), the *Belagerungsturm* (siege tower that lets a following Haufen onto the battlements) and the
+  **Donnerbüchse**. That last one is an experimental powder gun, historically right on the edge for 1300, so only
+  Glutmark has it, thanks to the sulphur of its volcanoes. It is loud and accurate, and sometimes it bursts.
+  Engines are built from blueprints, burn under fire arrows, lose crew to missiles, and start or stop with E.
+- **Battles:** *Die Belagerung* lets you storm a castle with all of the above, and *Die Verteidigung* has you hold
+  one against Otto's engines and guns.
 
 ## Mid- to large-scale battles: the *Haufen*
 
@@ -156,7 +233,20 @@ pavises, mounted men-at-arms and knights. Each counters something and is counter
   resolved on paper and towns change hands. Crimes such as theft, murder or poaching the duke's deer get you
   outlawed.
 
-## Learning German
+## Learning German — progressively
+
+German appears **gradually**, using a method called the *diglot weave*:
+- **Start:** about 20% of the vocabulary, the most important words, appears in German everywhere: UI labels,
+  item names, NPC speech, messages. Each such word is shown with its English gloss: *Leben (life)*,
+  *Ausdauer (stamina)*, *The Brot (bread) is fresh*.
+- **Mastery:** once you have seen a word **10 times across at least 2 play sessions**, it is mastered. The
+  English drops away and only *Brot* remains.
+- **New words:** every mastered word brings a new one into the learning set, so the game slowly shifts from
+  English into German as you play.
+- **Persistence:** progress is stored in `saves/lexikon.json` and carries over between saves. Correct quiz answers
+  count extra.
+
+Beyond the weave, hand-written lines still mix in whole German phrases.
 
 Dialogue mixes the two languages: *"[Guten Morgen], [Herr]! The [Brot] is fresh."* The German words are shown in
 gold, with glosses underneath (Brot = bread). Every word you hear, read or pick up — item names, tile names,
@@ -173,11 +263,14 @@ warlord/
   core/app.py               window, main loop, scenes, save/load (pickle + zlib)
   world/                    tiles (data registry) · world (numpy layers) · generator · structures
                             noise · weather · worldsim (liquids, fire, growth, collapse)
-  gfx/                      renderer (chunk cache, parallax, lighting) · tileart · rig (skeletal animation)
-                            sprites (formation sprite cache) · fx (particles, floating text)
-  entities/                 body (tile physics) · humanoid · player · npc (brains) · animals · boat · projectile
-  combat/                   weapons · combat (hit resolution, bracing) · units · formation (Haufen)
-  society/                  kingdoms · ranks · names · dialogue (+ Wörterbuch) · society (people, markets, politics)
+  gfx/                      renderer (chunk cache, parallax, lighting, seasons) · tileart · rig (low-poly
+                            skeletal animation + pose blending) · sprites · fx · ambient (birds, smoke…)
+  entities/                 body (tile physics) · humanoid · ragdoll (verlet) · player · npc (brains) · animals
+                            boat · projectile
+  combat/                   weapons · combat (hit resolution, bracing) · injury (hit locations, armour
+                            hardness, wounds) · units · formation (Haufen) · siege (engines, ladders, sapping)
+  society/                  kingdoms · ranks · names · dialogue (+ Wörterbuch) · lingua (progressive German)
+                            society (people, markets, politics)
   items/                    items · inventory · crafting · blueprints
   modes/                    session (the running game) · player_ctrl · story · battle
   ui/                       common (fonts, bilingual text) · hud (all screens) · menu

@@ -1264,7 +1264,7 @@ class Session:
         if self.battle is not None:
             self.battle.update(dt)
         self.fx.update(dt)
-        if not hasattr(self, "ambient"):
+        if getattr(self, "ambient", None) is None:
             from ..gfx.ambient import Ambient
             self.ambient = Ambient()
         self.ambient.update(self, dt, self.view_size())
@@ -1712,7 +1712,7 @@ class Session:
         env = self.env
         r.set_season(env.season())
         r.draw_sky(surf, env, cam)
-        if hasattr(self, "ambient"):
+        if getattr(self, "ambient", None) is not None:
             self.ambient.draw(surf, ox, oy, env)
         r.draw_parallax(surf, env, cam)
         r.draw_terrain(surf, cam)
@@ -1757,7 +1757,7 @@ class Session:
             if pr.fire:
                 lights.append((pr.x, pr.y, 0.6))
         r.draw_lighting(surf, cam, env, lights)
-        if hasattr(self, "ambient"):
+        if getattr(self, "ambient", None) is not None:
             self.ambient.draw_front(surf, ox, oy)
         self.draw_weather(surf, ox, oy)
         self.ui.draw_world_overlays(surf, ox, oy)

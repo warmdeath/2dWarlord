@@ -76,3 +76,21 @@ The difference isn't only in the amount of code. It's in the order the work was 
   compiled core.
 - The **story** is complete and playable end to end, but its longer journeys use cut-scene travel, and its
   dialogue is linear rather than branching.
+
+## Round 2
+
+The second round added sieges, low-poly modular bodies with ragdolls, hit locations with armour hardness and
+wounds, progressive German, realm-specific architecture, realistic farming and seasons. The same
+build-and-run-it loop caught bugs in that round too:
+
+- The siege tower couldn't roll up a 2-tile step, and every formation queued behind it forever. Formations now
+  only queue behind a block that is actually fighting or stuck at a wall.
+- The defenders only reacted when the player stood close by, so the drawbridge never rose.
+- The trebuchet and the guns were placed out of range and never fired. Once fixed, they battered the gatehouse
+  from 36 bricks down to 2.
+- After their first breach, sappers couldn't start on the next wall.
+- A farmer without a field crashed the game, and the ambient-life system failed after loading a save.
+
+The sapping test is a good example of the physics doing the work. Sappers dig 37 tiles of tunnel, swap 6
+foundation tiles for timber props and set them alight. Fire spreads through the props, and when 3 or more
+adjacent props are gone, the span rule brings 21 bricks of tower wall down.
