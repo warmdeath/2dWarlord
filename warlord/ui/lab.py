@@ -18,7 +18,10 @@ from .common import text, panel, ltext, bar
 
 TOOLS = [("saege", "Säge", "saw"), ("beitel", "Beitel", "chisel"), ("bohrer", "Bohrer", "drill"),
          ("raspel", "Raspel", "rasp")]
-BLANKS = {"wood": (72, 18), "beam": (128, 30), "planks": (112, 12), "log": (150, 30)}
+BLANKS = {"wood": (64, 10), "beam": (128, 18), "planks": (112, 4), "log": (150, 14)}
+BOARD = 4.0       # a board is 4 px thick (about a hand), the saw kerf and the bark are lost
+BARK = 1.0
+PER_PLANK = 48.0  # one 'Bretter' item per 48 px of board length
 
 
 class Lab:
@@ -97,6 +100,8 @@ class Lab:
                 self.cache = None
         elif k in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4):
             self.tool = TOOLS[k - pygame.K_1][0]
+        elif k == pygame.K_5:
+            self.split()
         elif k == pygame.K_RETURN:
             self.finish()
         elif k == pygame.K_ESCAPE:
@@ -178,8 +183,50 @@ class Lab:
                 self.cache = None
         elif kind == "finish":
             self.finish()
+        elif kind == "split":
+            self.split()
         elif kind == "cancel":
             self.cancel()
+
+    # ------------------------------------------------------------------ splitting into boards
+    def split_yield(self):
+        """How many boards a straight piece gives when ripped lengthwise, and planks per board."""
+        if self.wp is None:
+            return 0, 0, 0.0
+        p, L, _ = SH.normalise(self.wp.poly)
+        x0, y0, x1, y1 = p.bounds
+        T = y1 - y0
+        # only the straight, solid part of the piece counts: how full is its bounding box?
+        fill = self.wp.poly.area / max(1.0, L * T)
+        if fill < 0.8:
+            L *= fill
+        boards = int((T - 2 * BARK) // BOARD)
+        per = int(L // PER_PLANK)
+        if boards < 1 or per < 1:
+            return 0, 0, L
+        return boards, per, L
+
+    def split(self):
+        n_b, per, L = self.split_yield()
+        if not n_b:
+            self.ui.toast("Too thin or too short to split into boards ([Bretter|planks]).", 3)
+            return
+        g = self.g
+        p = g.player
+        n = n_b * per
+        left = p.inv.add("planks", n, quality=1.0)
+        if left:
+            g.drop_item("planks", left, self.bench.x, self.bench.y - 20)
+        chips = max(1, int(L // 60))
+        if p.inv.add("chip", chips):
+            pass
+        p.stats["shaped"] = p.stats.get("shaped", 0) + 1
+        g.sfx("chop")
+        g.emit("shaped", key="planks", q=1.0)
+        self.ui.toast(f"[Gespalten|split]: {n} [Bretter|planks] ({n_b} boards), the bark and the saw dust "
+                      f"go to the [Späne|chips].", 4)
+        self.wp = None
+        self.ui.modal = None
 
     # ------------------------------------------------------------------ results
     def _spawn(self, poly, kind, item, key, q, name=None):
@@ -331,6 +378,13 @@ class Lab:
             text(surf, f"{i + 1}  {de} ({en})", (rect.x + 10, rect.y + 8), 14, (240, 230, 210))
             self.rects.append((rect, "tool", k))
         text(surf, f"Breite (width): {self.width:.0f}", (r.x + 16, r.y + 250), 12, (200, 190, 170))
+        n_b, per, L = self.split_yield()
+        rect = pygame.Rect(r.x + 16, r.y + 440, 220, 46)
+        panel(surf, rect, 220 if n_b else 140, border=GOLD if n_b else (90, 80, 60))
+        text(surf, "5  Spalten (split into planks)", (rect.x + 10, rect.y + 6), 14, (240, 230, 210))
+        text(surf, f"→ {n_b * per} Bretter ({n_b} boards × {per})" if n_b else "too thin or too short to split",
+             (rect.x + 10, rect.y + 26), 11, (200, 190, 160))
+        self.rects.append((rect, "split", None))
         for i, (kind, label) in enumerate((("undo", "Rückgängig (Z)"), ("finish", "Fertig (Enter)"),
                                            ("cancel", "Abbrechen (Esc)"))):
             rect = pygame.Rect(r.x + 16, r.y + 280 + i * 40, 220, 34)

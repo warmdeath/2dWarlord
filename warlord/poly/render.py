@@ -205,14 +205,15 @@ class PolyRenderer(SkyRenderer):
             return g
         w = self.world
         ids = w.cave_chunks.get(cx, ())
-        if not ids:
+        dug = (getattr(w, "dug", None) or {}).get(cx)
+        if not ids and dug is None:
             self._chunk_full[cx] = None
             return None
         from shapely.ops import unary_union
         from shapely.geometry import box
         x0 = cx * CHUNK_PX
         clip = box(x0 - 1, -10000, x0 + CHUNK_PX + 1, 100000)
-        caves = unary_union([w.caves[i] for i in ids]).intersection(clip)
+        caves = unary_union([w.caves[i] for i in ids] + ([dug] if dug is not None else [])).intersection(clip)
         # only the part that is underground
         i0 = max(0, int(x0 // TILE))
         i1 = min(w.w, int((x0 + CHUNK_PX) // TILE) + 1)

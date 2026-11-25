@@ -499,8 +499,12 @@ class Humanoid(Body):
         m = self.mount
         it = self.intent
         m.ride_control(game, self, it, dt)
-        self.x = m.cx - self.w / 2
-        self.y = m.y - self.h + 14
+        from ..gfx.quadruped import saddle_offset
+        from ..gfx.rig import THIGH, SHIN
+        sx, sy = saddle_offset(m)
+        # the hips sit in the saddle; the skeleton is anchored at the feet below them
+        self.x = m.cx + sx - self.w / 2
+        self.y = m.feet + sy + (THIGH + SHIN) * 0.8 - self.h
         self.vx, self.vy = m.vx, m.vy
         self.facing = m.facing
         self.walk_phase = m.walk_phase

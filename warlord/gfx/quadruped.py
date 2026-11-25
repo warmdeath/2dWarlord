@@ -78,6 +78,24 @@ def gait_of(speed, sp):
     return "walk", speed / (sp["L"] * 1.1)
 
 
+def body_bob(a, sp, gait, t, S=1.0):
+    if gait == "gallop":
+        return math.sin(t * math.tau) * 2.5 * S
+    if gait == "trot":
+        return abs(math.sin(t * math.tau * 2)) * 1.6 * S
+    if gait == "walk":
+        return math.sin(t * math.tau * 2) * 0.6 * S
+    return math.sin(a.anim_t * 1.4) * 0.4 * S
+
+
+def saddle_offset(a):
+    """Where the rider's seat is, relative to the feet centre (x forward-signed, y up negative)."""
+    sp = SPEC.get(a.species, SPEC["horse"])
+    gait, _ = gait_of(abs(a.vx), sp)
+    bob = body_bob(a, sp, gait, a.walk_phase)
+    return a.facing * 3.0, -(sp["wh"] + sp["hh"]) / 2 - 3.0 + bob
+
+
 def draw_quadruped(surf, a, cx, fy, scale=1.0):
     """a: an Animal. cx, fy: screen position of the feet centre."""
     sp = SPEC.get(a.species)
@@ -103,17 +121,8 @@ def draw_quadruped(surf, a, cx, fy, scale=1.0):
     wh, hh = sp["wh"] * S, sp["hh"] * S
     leg = sp["leg"] * S
     # body rocking with the gait
-    bob = 0.0
-    pitch = 0.0
-    if gait == "gallop":
-        bob = math.sin(t * math.tau) * 2.5 * S
-        pitch = math.sin(t * math.tau + 0.8) * 0.09
-    elif gait == "trot":
-        bob = abs(math.sin(t * math.tau * 2)) * 1.6 * S
-    elif gait == "walk":
-        bob = math.sin(t * math.tau * 2) * 0.6 * S
-    else:
-        bob = math.sin(a.anim_t * 1.4) * 0.4 * S         # breathing
+    bob = body_bob(a, sp, gait, t, S)
+    pitch = math.sin(t * math.tau + 0.8) * 0.09 if gait == "gallop" else 0.0
     if a.species == "horse" and getattr(a, "rearing", 0) > 0:
         pitch = -0.5
     shoulder = (cx + f * L * 0.36, fy - wh + bob + f * pitch * L * 0.36 * 0)
@@ -261,6 +270,7 @@ def draw_quadruped(surf, a, cx, fy, scale=1.0):
     hw = d * (0.3 if a.species != "bear" else 0.42)
     mz = sp["muzzle"] * S * 0.5
     limb(surf, ne, he, hw, mz, coat)
+    a._bit = (he[0] - f * 2 * S, he[1] + 1 * S)
     # eye, nostril, ears
     ex = ne[0] + (he[0] - ne[0]) * 0.3
     ey = ne[1] + (he[1] - ne[1]) * 0.3 - hw * 0.35
@@ -317,7 +327,8 @@ def draw_quadruped(surf, a, cx, fy, scale=1.0):
         pygame.draw.line(surf, (60, 60, 64), (stx, sy + 1 * S), (stx, sy + d * 0.9), 1)
         pygame.draw.rect(surf, (90, 90, 96), (stx - 2 * S, sy + d * 0.9, 4 * S, 2 * S))
         pygame.draw.line(surf, (60, 40, 26), ne, he, 1)
-        pygame.draw.line(surf, (60, 40, 26), (he[0] - f * 2 * S, he[1]), (sx + f * 4 * S, sy - 4 * S), 1)
+        if a.rider is None or a.rider is True:
+            pygame.draw.line(surf, (60, 40, 26), (he[0] - f * 2 * S, he[1]), (sx + f * 4 * S, sy - 4 * S), 1)
     return True
 
 

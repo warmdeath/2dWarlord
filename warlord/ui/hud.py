@@ -25,7 +25,7 @@ SELL_LISTS = {
                  "rooftile", "slate", "clay", "rope", "cloth", "wool", "leather", "coal", "iron_ore", "iron_ingot",
                  "seeds", "torch", "arrow", "ladder", "door", "chest", "bed", "workbench", "boat"],
     "smith": ["schwert", "axt", "speer", "dolch", "streitkolben", "hellebarde", "spiess", "langschwert", "armbrust",
-              "bogen", "lanze", "spitzhacke", "hammer", "sichel", "holzschild", "dreieckschild", "pavese", "gambeson",
+              "bogen", "lanze", "spitzhacke", "schaufel", "hammer", "sichel", "holzschild", "dreieckschild", "pavese", "gambeson",
               "kettenhemd", "plattenrock", "kettenhaube", "eisenhut", "beckenhaube", "topfhelm", "arrow", "bolt",
               "iron_ingot", "anvil"],
     "innkeeper": ["beer", "wine", "bread", "cheese", "meat", "fish"],
@@ -940,8 +940,8 @@ class UI:
         from ..poly.materials import MATS
         from ..poly.objects import objects_near
         w = self.g.world
-        for t in w.near("tree_chunks", wx - 60, wx + 60):
-            if t.state == "stand" and abs(t.x - wx) < t.tw / 2 + 10 and t.y - t.h * 0.6 < wy < t.y + 4:
+        for t in w.near("tree_chunks", wx - 80, wx + 80):
+            if t.state == "stand" and self.g._on_tree(t, wx, wy):
                 de = {"oak": "Eiche", "beech": "Buche", "birch": "Birke", "pine": "Kiefer", "fir": "Tanne",
                       "lime": "Linde", "willow": "Weide", "dead": "toter Baum"}.get(t.kind, "Baum")
                 return f"{de} — fell it with an Axt ({int(100 * t.hp / max(1, t.max_hp))}%)"
@@ -1090,6 +1090,10 @@ class UI:
                 if n_ > 1:
                     text(surf, str(n_), (rr.right - 4, rr.bottom - 15), 11, right=True)
             text(surf, str(i + 1), (rr.x + 3, rr.y + 1), 10, (160, 150, 130))
+        # what you can do with what is under the mouse
+        hint = getattr(g.ctrl, "hint", None)
+        if hint and self.modal is None and getattr(p, "carrying", None) is None:
+            text(surf, hint, (SCREEN_W // 2, y0 - 42), 13, (250, 236, 190), center=True)
         # the bag
         br = pygame.Rect(x0 + nb * 50 + 16, y0 - 4, 96, 50)
         pygame.draw.ellipse(surf, (110, 84, 56), br.inflate(-30, -6))
@@ -1551,13 +1555,13 @@ class UI:
             ("Mouse L / J", "attack — the move depends on your state: standing = 3-hit combo, running = charge,"),
             ("", "crouching = low sweep (and Konter after a block), in the air = plunge"),
             ("Mouse R / K", "block — tap just before a hit to PARRY (stuns the attacker, no stamina)"),
-            ("Bow", "hold L to draw, aim with the mouse, release · V = fire arrows · wind & rain matter"),
-            ("Hands", "axe on a tree: fell it · axe on a trunk: cut it · hammer/pick on a wall: break it · pick on ore"),
+            ("Bow", "mouse: point and hold L, release · keys: hold J, W/S raise/lower (Shift fine), A/D turn, release"),
+            ("Hands", "hold L on a tree, a trunk, a wall, ore or the ground: the right tool is taken (fell/cut/dig)"),
             ("E", "pick up (small → bag, big → arms) · set down · doors · chests · beds · Werkbank · talk · mount"),
             ("Carrying", "click: set it down where you point · Shift+click: fix it in place · R rotate · G throw"),
             ("C", "shape the log at your feet: Q/E choose a form, drag axe strokes along the dashed lines, Enter"),
             ("1-4 / wheel", "belt · Q = drop · T = cycle shield/armour/helmet from your bag"),
-            ("I", "the Rucksack (bag) & crafting · Werkbank (E): shape wood precisely with the mouse"),
+            ("I", "Rucksack & crafting · Werkbank (E): shape wood with the mouse, 5 = split a log into planks"),
             ("B", "blueprints: huts, walls, gates, towers, chapels, halls, castles — raised piece by piece"),
             ("X / Tab / Z", "orders bar for your Haufen · Tab = select formation · Z = commander's zoomed-out view"),
             ("M", "world map, politics, fast travel by cart"),
