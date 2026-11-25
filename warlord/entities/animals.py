@@ -6,6 +6,7 @@ import pygame
 
 from ..settings import TILE, HORSE_WALK, HORSE_GALLOP, JUMP_SPEED
 from .body import Body
+from ..gfx.quadruped import draw_quadruped, draw_horse_at, SPEC
 
 SPECIES = {
     #          de        en        w   h   hp  speed  behaviour    drops                     colour
@@ -147,12 +148,22 @@ class Animal(Body):
         if self.in_water > 0.4:
             self.vy -= 900 * dt
         self.physics(game.world, dt)
-        self.walk_phase += abs(self.vx) * dt * 0.09
+        self.walk_phase += abs(self.vx) * dt / stride_len(self.species, abs(self.vx))
+        # grazing: idle herd animals lower their heads now and then
+        if self.behaviour in ("herd", "shy") and abs(self.vx) < 3:
+            self.graze_t = getattr(self, "graze_t", random.uniform(2, 6)) - dt
+            if self.graze_t <= 0:
+                self.graze_t = random.uniform(3, 8)
+                self.graze_on = not getattr(self, "graze_on", False)
+        else:
+            self.graze_on = False
+        self.graze = getattr(self, "graze", 0.0) + ((1.0 if getattr(self, "graze_on", False) else 0.0) -
+                                                    getattr(self, "graze", 0.0)) * min(1.0, dt * 3)
 
     def _fish(self, game, dt):
         w = game.world
-        tx, ty = int(self.cx // TILE), int(self.cy // TILE)
-        in_w = w.inside(tx, ty) and w.liq[tx, ty] > 4
+        lvl = w.water_level(self.cx)
+        in_w = lvl is not None and lvl + 4 < self.cy < w.surface_y(self.cx) - 2
         self.wander_t -= dt
         if self.wander_t <= 0:
             self.wander_t = random.uniform(1, 3)
@@ -166,8 +177,8 @@ class Animal(Body):
                 if self.hp <= 0:
                     self.dead = True
         nx, ny = self.x + self.vx * dt, self.y + self.vy * dt
-        ntx, nty = int((nx + self.w / 2) // TILE), int((ny + self.h / 2) // TILE)
-        if w.inside(ntx, nty) and w.liq[ntx, nty] > 4 and not w.solid(ntx, nty) or not in_w:
+        nl = w.water_level(nx + self.w / 2)
+        if (nl is not None and nl + 4 < ny + self.h / 2 < w.surface_y(nx + self.w / 2) - 2) or not in_w:
             self.x, self.y = nx, ny
             if not in_w:
                 self.physics(w, dt)
@@ -192,108 +203,63 @@ class Animal(Body):
             self.vx *= 0.97
         self.step_up = 2
         self.physics(game.world, dt)
-        self.walk_phase += abs(self.vx) * dt * 0.05
+        self.walk_phase += abs(self.vx) * dt / stride_len(self.species, abs(self.vx))
+        self.graze = 0.0
         if self.void_fall > 0:
             rider.void_fall = self.void_fall
 
     # ------------------------------------------------------------- drawing
     def draw(self, surf, ox, oy):
-        x, y = self.x - ox, self.y - oy + self.step_smooth
+        x, y = self.x - ox, self.y - oy
         if not (-80 < x < surf.get_width() + 80 and -80 < y < surf.get_height() + 80):
             return
-        if self.species == "horse":
-            draw_horse(surf, self.cx - ox, self.feet - oy + self.step_smooth, self.facing, self.walk_phase,
-                       self.color, abs(self.vx) > 4, dead=self.dead, gallop=abs(self.vx) > HORSE_WALK * 1.2,
-                       saddle=self.owner is not None or self.rider is not None)
+        cx, fy = self.cx - ox, self.feet - oy
+        if draw_quadruped(surf, self, cx, fy):
             return
         f = self.facing
         c = self.color if not self.hurt_flash else (255, 255, 255)
-        cx, fy = self.cx - ox, self.feet - oy + self.step_smooth
-        if self.dead:
-            pygame.draw.ellipse(surf, c, (cx - self.w / 2, fy - self.h * 0.5, self.w, self.h * 0.5))
-            return
         if self.species == "fish":
-            pygame.draw.ellipse(surf, c, (cx - 7, fy - 8, 14, 7))
-            pygame.draw.polygon(surf, c, [(cx - f * 7, fy - 5), (cx - f * 12, fy - 9), (cx - f * 12, fy - 1)])
+            sw = math.sin(self.anim_t * 8) * 2
+            body = [(cx + f * 8, fy - 5), (cx + f * 2, fy - 9), (cx - f * 5, fy - 7), (cx - f * 7, fy - 5 + sw * 0.3),
+                    (cx - f * 5, fy - 3), (cx + f * 2, fy - 1)]
+            pygame.draw.polygon(surf, c, body)
+            pygame.draw.polygon(surf, tuple(min(255, int(v * 1.15)) for v in c), body[:3] + [(cx, fy - 5)])
+            pygame.draw.polygon(surf, tuple(int(v * 0.75) for v in c),
+                                [(cx - f * 7, fy - 5), (cx - f * 12, fy - 9 + sw), (cx - f * 12, fy - 1 + sw)])
+            pygame.draw.circle(surf, (20, 20, 20), (int(cx + f * 5), int(fy - 6)), 1)
             return
         if self.species == "chicken":
-            bob = math.sin(self.walk_phase * 3) * 1
-            pygame.draw.ellipse(surf, c, (cx - 5, fy - 9 + bob, 10, 7))
-            pygame.draw.circle(surf, c, (cx + f * 4, fy - 10 + bob), 3)
-            pygame.draw.polygon(surf, (230, 160, 40), [(cx + f * 6, fy - 10), (cx + f * 9, fy - 9), (cx + f * 6, fy - 8)])
-            pygame.draw.circle(surf, (200, 40, 40), (cx + f * 4, fy - 13 + bob), 1)
-            pygame.draw.line(surf, (230, 160, 40), (cx, fy - 3), (cx, fy), 1)
+            ph = self.walk_phase * math.tau
+            bob = abs(math.sin(ph)) * 1.2 if abs(self.vx) > 3 else 0
+            peck = getattr(self, "graze", 0.0)
+            for k in (0, 1):
+                a_ = math.sin(ph + k * math.pi) * 0.5 if abs(self.vx) > 3 else 0
+                pygame.draw.line(surf, (226, 160, 50), (cx - f * 1, fy - 4), (cx - f * 1 + math.sin(a_) * 3, fy), 1)
+            body = [(cx - f * 6, fy - 8 + bob), (cx - f * 3, fy - 11 + bob), (cx + f * 3, fy - 10 + bob),
+                    (cx + f * 4, fy - 6 + bob), (cx - f * 2, fy - 4 + bob)]
+            pygame.draw.polygon(surf, c, body)
+            pygame.draw.polygon(surf, tuple(int(v * 0.85) for v in c), [body[0], body[1], (cx - f * 1, fy - 7 + bob)])
+            hx, hy = cx + f * (5 + peck * 2), fy - 12 + bob + peck * 7
+            pygame.draw.circle(surf, c, (int(hx), int(hy)), 3)
+            pygame.draw.polygon(surf, (230, 160, 40), [(hx + f * 2, hy - 1), (hx + f * 5, hy), (hx + f * 2, hy + 1)])
+            pygame.draw.polygon(surf, (200, 40, 40), [(hx - 1, hy - 3), (hx + 1, hy - 5), (hx + 2, hy - 2)])
+            pygame.draw.circle(surf, (20, 20, 20), (int(hx + f), int(hy - 1)), 1)
             return
-        w, h = self.w, self.h
-        body_h = h * 0.55
-        leg_h = h * 0.4
-        by = fy - leg_h - body_h
-        ph = self.walk_phase
-        legc = tuple(int(v * 0.7) for v in c)
-        for i, lx in enumerate((-w * 0.32, -w * 0.2, w * 0.22, w * 0.34)):
-            sw = math.sin(ph + (i % 2) * math.pi) * 0.5 if abs(self.vx) > 4 else 0
-            x0 = cx + lx * f
-            pygame.draw.line(surf, legc, (x0, fy - leg_h), (x0 + sw * leg_h * f, fy), 3)
-        pygame.draw.ellipse(surf, c, (cx - w / 2, by, w, body_h + 2))
-        hx = cx + f * w * 0.48
-        hy = by + body_h * 0.2
-        head_r = {"cow": 6, "sheep": 5, "pig": 6, "deer": 5, "boar": 6, "wolf": 5, "bear": 8}.get(self.species, 5)
-        pygame.draw.circle(surf, c, (hx, hy), head_r)
-        pygame.draw.circle(surf, (20, 20, 20), (hx + f * head_r * 0.4, hy - 1), 1)
-        if self.species == "sheep":
-            for k in range(5):
-                pygame.draw.circle(surf, (250, 248, 240), (cx - w * 0.35 + k * w * 0.17, by + 3), 4)
-            pygame.draw.circle(surf, (60, 56, 50), (hx, hy), 4)
-        elif self.species == "cow":
-            pygame.draw.circle(surf, (60, 50, 44), (cx - f * 4, by + 6), 4)
-            pygame.draw.line(surf, (230, 220, 200), (hx - 4, hy - 5), (hx - 7, hy - 9), 2)
-            pygame.draw.line(surf, (230, 220, 200), (hx + 4, hy - 5), (hx + 7, hy - 9), 2)
-        elif self.species == "pig":
-            pygame.draw.ellipse(surf, (240, 170, 170), (hx + f * 3 - 3, hy - 1, 6, 5))
-        elif self.species == "deer":
-            for s in (-1, 1):
-                pygame.draw.line(surf, (200, 180, 140), (hx, hy - 4), (hx + s * 5, hy - 14), 2)
-                pygame.draw.line(surf, (200, 180, 140), (hx + s * 3, hy - 9), (hx + s * 8, hy - 11), 1)
-        elif self.species in ("wolf",):
-            pygame.draw.polygon(surf, c, [(hx, hy - 4), (hx + f * 2, hy - 10), (hx + f * 4, hy - 3)])
-            pygame.draw.polygon(surf, c, [(hx + f * 3, hy), (hx + f * 11, hy + 2), (hx + f * 3, hy + 4)])
-            pygame.draw.line(surf, c, (cx - f * w / 2, by + 4), (cx - f * (w / 2 + 8), by + 8), 3)
-        elif self.species == "boar":
-            pygame.draw.line(surf, (240, 236, 226), (hx + f * 4, hy + 2), (hx + f * 6, hy - 3), 2)
-        if self.hurt_flash:
-            pygame.draw.ellipse(surf, (255, 255, 255), (cx - w / 2, by, w, body_h + 2), 1)
+        pygame.draw.ellipse(surf, c, (cx - self.w / 2, fy - self.h, self.w, self.h))
+
+
+def stride_len(species, speed):
+    sp = SPEC.get(species)
+    if sp is None:
+        return 30.0
+    L = sp["L"]
+    return L * (1.1 if speed < L * 1.9 else 1.6 if speed < L * 3.2 else 2.4)
 
 
 def draw_horse(surf, cx, fy, f, ph, color, moving, dead=False, gallop=False, saddle=False, shade=1.0):
     c = tuple(int(v * shade) for v in color)
-    dark = tuple(int(v * 0.6) for v in c)
-    if dead:
-        pygame.draw.ellipse(surf, c, (cx - 22, fy - 14, 44, 14))
-        return
-    leg = 15
-    by = fy - leg - 14
-    amp = 0.7 if gallop else 0.4
-    for i, lx in enumerate((-15, -10, 11, 16)):
-        a = math.sin(ph * (1.6 if gallop else 1.0) + (i % 2) * math.pi + (i // 2) * 0.6) * amp if moving else 0
-        x0 = cx + lx * f
-        kx = x0 + math.sin(a) * leg * 0.5 * f
-        ky = fy - leg * 0.5
-        pygame.draw.line(surf, dark, (x0, fy - leg), (kx, ky), 3)
-        pygame.draw.line(surf, dark, (kx, ky), (kx + math.sin(a * 1.4) * 3 * f, fy), 3)
-    bob = math.sin(ph * 2) * (2 if gallop else 1) if moving else 0
-    pygame.draw.ellipse(surf, c, (cx - 21, by + bob, 42, 16))
-    nx = cx + f * 16
-    pygame.draw.polygon(surf, c, [(nx - f * 4, by + 4 + bob), (nx + f * 6, by - 14 + bob), (nx + f * 11, by - 10 + bob),
-                                  (nx + f * 4, by + 8 + bob)])
-    pygame.draw.ellipse(surf, c, (nx + f * 6 - 6 + (f < 0) * -4, by - 17 + bob, 14, 8))
-    pygame.draw.circle(surf, (20, 20, 20), (int(nx + f * 9), int(by - 14 + bob)), 1)
-    pygame.draw.line(surf, (40, 30, 24), (nx - f * 1, by + 2 + bob), (nx + f * 5, by - 14 + bob), 3)
-    tail_sw = math.sin(ph * 2) * 3
-    pygame.draw.line(surf, (40, 30, 24), (cx - f * 20, by + 4 + bob), (cx - f * 26, by + 16 + tail_sw), 3)
-    if saddle:
-        pygame.draw.rect(surf, (110, 40, 30), (cx - 8, by - 1 + bob, 16, 7), border_radius=2)
+    draw_horse_at(surf, cx, fy, f, ph, moving, gallop, coat=c)
 
 
 def draw_horse_simple(surf, x, y, f, frame, shade, moving):
-    draw_horse(surf, x, y, f, frame / 8.0 * math.tau, (120, 82, 52), moving, gallop=moving, saddle=True,
-               shade=shade)
+    draw_horse(surf, x, y, f, frame / 8.0, (120, 82, 52), moving, gallop=moving, saddle=True, shade=shade)

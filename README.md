@@ -8,24 +8,30 @@ takes about an hour.
 You start in the mud as a serf and can climb the **Ständeordnung** (the social order) to knight, baron, count —
 while every NPC speaks a mix of English and **German** you can learn from (every word goes into your *Wörterbuch*).
 
-![village](docs/screenshots/02_village_erlenbach.jpg)
+The world is made of **polygons with real rigid-body physics** (pymunk): smooth terrain with carved caves,
+buildings assembled from timber, plaster, brick and stone pieces that fall when they lose their support, trees
+that topple on their stumps, and wood you **shape by hand** into doors, stakes, ladders and wheels.
+
+![village](docs/screenshots/46_erlenbach.jpg)
 
 | | |
 |---|---|
-| ![castle](docs/screenshots/03_hochburg_castle.jpg) | ![battle](docs/screenshots/12_battle_igel_vs_knights.jpg) |
-| ![dialogue](docs/screenshots/04_dialogue.jpg) | ![sailing](docs/screenshots/07_sailing_storm.jpg) |
-| ![edge](docs/screenshots/09_edge_of_the_world.jpg) | ![stand](docs/screenshots/05_standeordnung.jpg) |
-| ![mine](docs/screenshots/08_silver_mine_night.jpg) | ![fire](docs/screenshots/11_village_fire.jpg) |
-| ![tower city](docs/screenshots/14_hochburg_tower_city.jpg) | ![brick gables](docs/screenshots/15_luebenau_stepped_gables.jpg) |
-| ![siege](docs/screenshots/20_siege.jpg) | ![sapping](docs/screenshots/19_sapping_collapse.jpg) |
-| ![winter](docs/screenshots/16_winter_walkway.jpg) | ![longhouses](docs/screenshots/18_frostholm_longhouses.jpg) |
+| ![tower city](docs/screenshots/30_hochburg_towers.jpg) | ![brick gables](docs/screenshots/31_luebenau_brick.jpg) |
+| ![felling](docs/screenshots/35_felling.jpg) | ![trunk falls](docs/screenshots/36_trunk_falls.jpg) |
+| ![field shaping](docs/screenshots/37_field_shaping.jpg) | ![workbench](docs/screenshots/38_workbench_lab.jpg) |
+| ![house](docs/screenshots/40_house_before.jpg) | ![collapse](docs/screenshots/41_house_collapse.jpg) |
+| ![drawbridge](docs/screenshots/42_moat_drawbridge.jpg) | ![raised](docs/screenshots/43_drawbridge_raised.jpg) |
+| ![cave](docs/screenshots/34_cave_ore.jpg) | ![night](docs/screenshots/33_village_night.jpg) |
+| ![forest](docs/screenshots/32_forest.jpg) | ![rucksack](docs/screenshots/39_rucksack.jpg) |
 
-![low-poly rig](docs/screenshots/21_lowpoly_rig.jpg)
+![animals](docs/screenshots/44_animals.jpg)
+
+The block/tile-based version of round 2 is kept in [`legacy/tile_v2/`](legacy/tile_v2) for comparison.
 
 ## Run it
 
 ```bash
-pip install pygame-ce numpy
+pip install pygame-ce numpy pymunk shapely
 ```
 
 ```bash
@@ -49,13 +55,61 @@ Python 3.10+. Classic `pygame` 2.x also works. F11 toggles fullscreen, F3 shows 
 | Key | Action |
 |---|---|
 | A / D, Shift, S, Space, W | walk, run, crouch (run + crouch = slide), jump, climb / swim up |
-| Left mouse / J | attack — the move depends on your state (see Combat) · mine / place / eat with tools, blocks, food |
+| Left mouse / J | attack — the move depends on your state (see Combat) · with a tool or weapon on a **tree, trunk, wall or ore vein**: swing at it |
 | Right mouse / K | block — tap it just before a hit lands to **parry** |
-| E | talk, doors and gates, chests, beds, mount a horse, board a boat, harvest, pray, read signposts, winch, pour pitch, start/stop a siege engine |
-| 1–0 / mouse wheel | hotbar · Q drop · T cycle shield / armour / helmet · V fire arrows · click with a Verband to bind wounds, with a Hacke to till, with Mist to manure |
-| I · B · M · N · R | inventory & crafting · blueprints · world map · Wörterbuch (Q = quiz) · Ständeordnung |
-| C · Tab · Z | formation orders · select formation · commander's zoomed-out view |
+| E | pick up (small things go in the bag, big ones into your arms) · set down · doors and gates · chests · beds · **Werkbank** · talk · mount · board · harvest · pray · signposts · winch · pitch |
+| Carrying | left click: set it down where you point · **Shift + click: fix it in place** (a door in a frame, stakes as a barrier, a plank bridge, a ladder) · R rotate · G throw |
+| C | **shape the log at your feet**: Q / E choose a form, drag axe strokes along the dashed lines, Enter when done |
+| 1–4 / mouse wheel | belt · Q drop · T cycle shield / armour / helmet · V fire arrows · click with a Verband to bind wounds, with a Hacke to till, with Mist to manure, with a Sichel to reap |
+| I · B · M · N · R | the Rucksack & crafting · blueprints · world map · Wörterbuch (Q = quiz) · Ständeordnung |
+| X · Tab · Z | formation orders · select formation · commander's zoomed-out view |
 | F5 / F9 · Esc · H | save / load · pause · help |
+
+## The polygon world (round 3)
+
+- **No blocks.** The ground is a smooth surface over a crust of rock, drawn in faceted low-poly bands (turf,
+  soil, rock strata). Caves are winding passages cut out of it with shapely, with ore veins in their walls (iron,
+  coal, silver in Hochburg, salt, gold deep down, glowing *Glutstein* in Glutmark) and pale mushrooms. Water is
+  a body with a level, waves and buoyancy; the Fire Sea and the Abyss are still at the ends of the world, and the
+  brink still crumbles — now in rigid chunks that tumble into the void.
+- **Real physics.** One pymunk space: people and animals are capsules with a hand-animated skeleton on top;
+  logs, planks, debris, stones and everything you make are rigid bodies that roll, stack, float and burn. Doors
+  are pieces that turn into sensors when they open; upper floors are one-way platforms you jump up through.
+- **Buildings made of pieces.** A Fachwerk house is oak posts, plaster panels between rails and braces, plank
+  floors, a thatched or tiled roof in two slabs over a framed gable, a chimney, doors. Stone keeps, town walls and
+  bridges are coursed masonry, block by block, with battlements and voussoir arches. Each piece has a material
+  (hardness, hit points, whether it burns) and a place in a **support graph**: what it rests on, what it is
+  bonded to on each side. Break a piece and the graph is re-checked; whatever has lost its support becomes a
+  rigid body and the physics engine decides how the wall or the roof comes down. Fire runs through timber,
+  thatch and shingles piece by piece.
+- **The few things you do with your hands:**
+  - **Fell trees.** Chop with an axe; the trunk becomes a rigid body hinged on its stump and topples away from
+    you — the crown crashes down, hurts whoever stands there, and scatters wood and saplings. Stumps regrow.
+  - **Buck and carry.** Cut a lying trunk where you strike it. Small logs go in the bag; big ones you carry in
+    both arms, slowly.
+  - **Break structures.** Hammers and picks bite into walls, axes into timber; trebuchet stones and rams knock
+    pieces out.
+  - **Place what you made**, loose (it falls and settles) or fixed in place.
+  - **Go underground** with a torch and a pick.
+- **Shaping wood (procedural crafting).** You don't choose "door" from a menu; you cut one out of a piece of
+  wood. A Werkstück is a polygon. *In the field*, press C at a log: the target shape is laid over it as dashed
+  guide lines, and you make axe strokes along them with the mouse — fast strokes wobble, practice steadies your
+  hand. *At a Werkbank* you work slowly and exactly: the **Säge** cuts straight through along a line you drag
+  (Shift snaps to the guide), the **Beitel** carves grooves (the rungs of a ladder, the hollow of a trough), the
+  **Bohrer** drills holes, the **Raspel** rounds edges, with undo. The result is compared with a library of known
+  forms — Brett, Balken, Pfahl, Spitzpfahl, Tür, Keil, Stiel, Schaft, Knüppel, Schild, Rad, Rundschild, Leiter,
+  Schemel, Schale, Trog — and the best fit and how closely you matched it decide what you made and its quality
+  (Güte). Offcuts that happen to match a form are kept too. Anything that matches nothing is a *Rohling*, still a
+  real object you can place. Shaped parts feed the smiths: a Stiel and iron make an axe, a Schaft makes a spear.
+- **The Rucksack.** Like a real pack, not a grid of slots: things go in as they are, limited by weight (36 kg);
+  opening it lays them out on a cloth as little piles. Four things hang on your **belt** within reach. Trunks,
+  doors, ladders and beams don't fit in any bag — you carry them in your arms.
+- **Animals with skeletons.** Horses, cattle, sheep, pigs, deer, boar, wolves and bears have four two-bone legs
+  solved by inverse kinematics and real gaits — a four-beat walk, a diagonal trot, a rotary gallop with
+  suspension. Hind legs fold at the hock, the body rocks, the neck nods, herd animals graze, horses wear saddle,
+  blanket and bridle.
+- **Ragdolls with joints.** The fallen become chains of rigid bones pinned at the joints with rotation limits;
+  they drape over walls and logs and are frozen into still poses after a while to keep big battles cheap.
 
 ## What's in the world
 
@@ -71,10 +125,8 @@ Python 3.10+. Classic `pygame` 2.x also works. F11 toggles fullscreen, F3 shows 
 | Frostholm | Inselkönigreich (island kingdom) | across the Grey Sea: snow, fjords | Königin Sigrun |
 | Glutmark | Markgrafschaft (march) | ash, basalt, volcanoes, the Fire Sea | Markgraf Otto der Rote |
 
-- **Tile world with a smooth look.** 48 000 × 256 tiles (a 1-hour ride), generated in ~4 s. Natural tiles get
-  rounded corners where they face open air, so hills look soft instead of blocky. Caves, ores (coal, iron, silver
-  in Hochburg, salt, gold, *Glutstein* near the lava), underground lava, lakes, an ocean with a sandy, gravelly
-  seabed full of seaweed, shells and shipwrecks with loot.
+- **A 1-hour ride** (768 000 px) generated in about a second: caves with ore veins, lakes, an ocean with a seabed
+  full of seaweed, shells and shipwrecks with loot.
 - **The ends of the world.** In the west the land is a crumbling slab hanging over the void, with floating stones
   above it and gravity that weakens near the brink. Fall in, and after a few seconds the sky drops you back into
   the world somewhere else. Enemies you knock into the Abyss sometimes come back the same way. In story mode the
@@ -111,9 +163,9 @@ Python 3.10+. Classic `pygame` 2.x also works. F11 toggles fullscreen, F3 shows 
 - **Seasons and life:** spring blossom, autumn colours and falling leaves, winter snow on every roof and bare
   trees. You'll also see birch woods, ferns, reeds by the water, heather, glacial boulders, flocks of birds,
   butterflies, fireflies on summer nights, and smoke from chimneys and kilns.
-- **Building and crafting:** mine and place single tiles, Terraria-style, or use **blueprints** (huts, burgher
-  houses, smithies, mills, wells, walls, gates, watchtowers, chapels, knights' halls, a whole castle) that
-  builders raise tile by tile. About 60 recipes at the Werkbank, Amboss + Esse, Ofen and Webstuhl.
+- **Building and crafting:** **blueprints** (huts, burgher houses, smithies, mills, wells, walls, gates,
+  watchtowers, chapels, knights' halls, a whole castle) are raised piece by piece from the ground up; wood is
+  shaped by hand (above); about 50 recipes at the Werkbank, Amboss + Esse, Ofen and Webstuhl cover the rest.
 
 ## Combat
 
@@ -141,7 +193,7 @@ pierce and blunt, and slows you down.
 
 Characters are **modular low-poly skeletons**: tapered, two-tone limbs on bones, driven by layered poses
 (legs move, arms act, and the two blend smoothly). When someone dies, the same skeleton becomes a **verlet
-ragdoll** that tumbles down slopes and settles on the tiles, and soldiers falling out of formation ranks do
+ragdoll** of jointed rigid bones that tumbles down slopes and settles, and soldiers falling out of formation ranks do
 the same.
 
 Every hit lands on a **body part**, depending on the height of the blow, and armour protects only the parts it
@@ -167,18 +219,19 @@ Wounds heal with rest, or a priest or monk can tend them for a donation. The HUD
 
 ## Sieges (Belagerung)
 
-This is warfare against the tile world itself, so the physics decides what stands and what falls.
+This is warfare against the world itself: walls are pieces in a support graph, so the physics decides what stands
+and what falls.
 
 - **Defences:** fortified castles have a **Graben** (moat), a **Zugbrücke** (drawbridge) and an iron
   **Fallgatter** (portcullis), plus open fighting tops on the towers and **Pechnasen** (machicolations). The
-  defenders raise the bridge and drop the portcullis when an enemy comes near, and pour **boiling pitch** on
+  defenders wind the drawbridge up on its chains (a kinematic body rotating on its hinge) and drop the portcullis when an enemy comes near, and pour **boiling pitch** on
   whatever reaches the gate. You can do the same with E at the winch or the Pechnase.
 - **Ramps:** soldiers stuck in a moat shovel earth in front of them until they can climb out, so a moat is
   literally filled with men's work.
-- **Sturmleitern:** ladder men raise real ladder tiles against the wall and climb one by one. A defender at the
-  top can **shove the ladder away**. If the attackers hold the wall long enough, they open the gate from inside.
-- **Mineure (sappers):** they dig a real tunnel, swap the wall's foundation for timber props, then set the props
-  on fire. Masonry can arch over a 2-tile gap, but not over 3, so the wall collapses.
+- **Sturmleitern:** ladder men raise real ladders against the wall and climb one by one. A defender at the
+  top can **shove the ladder away**, and it falls as a rigid body. If the attackers hold the wall long enough, they open the gate from inside.
+- **Mineure (sappers):** they dig a real tunnel under the wall, take its footing away and hold it up on timber
+  props, then set the props on fire. When the props burn through, the wall has nothing left to stand on.
 - **Engines:** the *Rammbock* (ram under a hide roof), the *Blide* (counterweight trebuchet throwing stones that
   break masonry), the *Belagerungsturm* (siege tower that lets a following Haufen onto the battlements) and the
   **Donnerbüchse**. That last one is an experimental powder gun, historically right on the edge for 1300, so only
@@ -215,7 +268,7 @@ pavises, mounted men-at-arms and knights. Each counters something and is counter
 ## Society
 
 - **NPCs live their lives:** they sleep in their own beds, work by day and gather at the tavern in the evening.
-  Farmers really harvest and re-sow the wheat tiles, woodcutters fell real trees, smiths hammer, priests pray,
+  Farmers really harvest and re-sow the strips of their fields, woodcutters fell real trees, smiths hammer, priests pray,
   guards patrol, and town gates open for friends and stay barred against enemies. Workers stay indoors in the rain, villagers fight fires,
   civilians flee from danger and guards fight. Each person has a name, a trade, a rank and a home. Only the people
   near you exist as full entities; everyone else lives on as a record (level-of-detail simulation).
@@ -249,7 +302,7 @@ German appears **gradually**, using a method called the *diglot weave*:
 Beyond the weave, hand-written lines still mix in whole German phrases.
 
 Dialogue mixes the two languages: *"[Guten Morgen], [Herr]! The [Brot] is fresh."* The German words are shown in
-gold, with glosses underneath (Brot = bread). Every word you hear, read or pick up — item names, tile names,
+gold, with glosses underneath (Brot = bread). Every word you hear, read or pick up — item names, material names,
 orders, chronicle pages — is recorded in your **Wörterbuch** with a count, and Q starts a flash-card quiz. NPCs
 address you with *du* or the formal *Ihr* depending on your rank.
 
@@ -261,34 +314,40 @@ warlord/
   settings.py               all tunables (world size, physics, palette)
   audio.py                  procedural sound bank (numpy-synthesised, no asset files)
   core/app.py               window, main loop, scenes, save/load (pickle + zlib)
-  world/                    tiles (data registry) · world (numpy layers) · generator · structures
-                            noise · weather · worldsim (liquids, fire, growth, collapse)
-  gfx/                      renderer (chunk cache, parallax, lighting, seasons) · tileart · rig (low-poly
-                            skeletal animation + pose blending) · sprites · fx · ambient (birds, smoke…)
-  entities/                 body (tile physics) · humanoid · ragdoll (verlet) · player · npc (brains) · animals
-                            boat · projectile
-  combat/                   weapons · combat (hit resolution, bracing) · injury (hit locations, armour
-                            hardness, wounds) · units · formation (Haufen) · siege (engines, ladders, sapping)
+  poly/                     world (terrain lines, caves, water, pymunk space, streaming) · gen (geography,
+                            settlements, flora) · prefab (buildings from pieces, support graph, gatehouses)
+                            materials · objects (rigid bodies) · flora (low-poly trees) · render
+  world/                    noise · weather
+  gfx/                      renderer (sky, parallax, camera) · rig (low-poly humanoid skeleton) · quadruped
+                            (IK legs, gaits) · sprites · fx · ambient (birds, smoke…)
+  entities/                 body (pymunk capsule) · humanoid · ragdoll (jointed rigid bones) · player · npc
+                            (brains) · animals · boat · projectile
+  combat/                   weapons · combat · injury · units · formation (Haufen) · siege
   society/                  kingdoms · ranks · names · dialogue (+ Wörterbuch) · lingua (progressive German)
                             society (people, markets, politics)
-  items/                    items · inventory · crafting · blueprints
-  modes/                    session (the running game) · player_ctrl · story · battle
-  ui/                       common (fonts, bilingual text) · hud (all screens) · menu
-legacy/                     the original prototype, untouched
+  items/                    items · inventory (the Rucksack) · shaping (procedural crafting) · crafting ·
+                            blueprints
+  modes/                    session (the running game) · world_ops (felling, breaking, fire, doors, fields,
+                            carrying, placing) · player_ctrl (incl. field shaping) · story · battle
+  ui/                       common · hud · bagui (the Rucksack view) · lab (the workbench) · menu
+legacy/                     the original prototype · tile_v2/ the round-2 tile version
 ```
 
 Key design decisions:
 - **Controllers fill an `Intent`.** The keyboard, NPC brains and formations all drive the same `Humanoid` the same
   way, so a peasant, a knight and you fight by identical rules.
-- **Data-driven registries** for tiles, items, weapons, units, ranks, recipes, blueprints and dialogue. Adding
-  content means adding data, not code.
-- **numpy world layers** (foreground, background walls, liquid, lava) indexed `[x, y]`, so generation, lighting
-  and the renderer use vectorised operations.
-- **Chunk-cached rendering** (32×32-tile surfaces, rebuilt only when dirty) plus a soft light map computed at
-  tile resolution and upscaled.
+- **The physics body keeps the old interface.** `physics()` hands the wanted velocity to pymunk (projected along
+  last step's contacts, so walls stop you and slopes guide you), the session steps the space once for everyone,
+  and `post_step()` reads back position, ground contact and landings. That let the combat, brains, formations
+  and story code survive the switch from tiles to polygons almost unchanged.
+- **Streaming:** terrain segments and building pieces are added to the physics space only around the player
+  (±2 700 px) and removed behind; the rest of the world is plain data.
+- **Cached rendering:** terrain in 512 px tiles, each building in its own surface, rebuilt only when a piece
+  changes; light is a coarse numpy grid (depth below the surface, water, point lights) multiplied over the scene.
 - **Level-of-detail simulation:** people, livestock, boats and armies are records far away and entities nearby.
-- **Session service API:** systems never reach into each other; they call the session (`targets_near`,
-  `hostile`, `break_tile`, `fire_arrow`, `npc_say`, `emit`...). The story and battle modes listen to events.
+- **Session service API:** systems never reach into each other; they call the session (`hit_world`,
+  `damage_piece`, `fell_tree`, `put_down`, `fire_arrow`, `npc_say`, `emit`...). Story and battle modes listen to
+  events.
 
 See [docs/COMPARISON.md](docs/COMPARISON.md) for how this compares to the original prototype, and
 [docs/original_design_notes.txt](docs/original_design_notes.txt) for the first design notes.

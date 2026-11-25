@@ -6,7 +6,8 @@ import numpy as np
 import pygame
 
 from ..settings import SCREEN_W, SCREEN_H, TILE, GOLD, PARCHMENT, INK, GERMAN_COLOR, SEA_LEVEL
-from ..world import tiles as T
+from . import bagui
+from .lab import Lab
 from ..items.items import ITEMS
 from ..items import crafting as CR
 from ..items.blueprints import BLUEPRINTS
@@ -78,7 +79,7 @@ class UI:
     # ------------------------------------------------------------------ state
     def modal_blocks(self):
         return self.modal in ("pause", "death", "card", "map", "woerterbuch", "stand", "help", "dialogue", "trade",
-                              "inventory") or self.fade_t > 0.6
+                              "inventory", "lab") or self.fade_t > 0.6
 
     def captures_input(self):
         return self.modal is not None or self.order_bar
@@ -108,6 +109,11 @@ class UI:
     def death_screen(self):
         self.modal = "death"
 
+    def open_lab(self, bench):
+        self.lab = Lab(self, bench)
+        self.modal = "lab"
+        self.g.sfx("ui")
+
     def open(self, name):
         self.modal = name
         self.scroll = 0
@@ -130,6 +136,18 @@ class UI:
             t[1] -= dt
         self.toasts = [t for t in self.toasts if t[1] > 0]
         for e in events:
+            if self.modal == "lab" and getattr(self, "lab", None) is not None:
+                if e.type == pygame.KEYDOWN:
+                    self.lab.key(e.key)
+                elif e.type == pygame.MOUSEBUTTONDOWN and e.button in (1, 3):
+                    self.lab.mouse_down(e.pos, e.button)
+                elif e.type == pygame.MOUSEMOTION:
+                    self.lab.mouse_move(e.pos, e.buttons)
+                elif e.type == pygame.MOUSEBUTTONUP and e.button == 1:
+                    self.lab.mouse_up(e.pos, e.button)
+                elif e.type == pygame.MOUSEWHEEL:
+                    self.lab.wheel(e.y)
+                continue
             if e.type == pygame.KEYDOWN:
                 self.key(e.key, e)
             elif e.type == pygame.MOUSEBUTTONDOWN:
@@ -138,7 +156,7 @@ class UI:
                 if self.modal in ("woerterbuch", "inventory", "trade"):
                     self.scroll = max(0, self.scroll - e.y)
                 elif self.modal is None:
-                    p.inv.selected = (p.inv.selected - e.y) % 10
+                    p.inv.selected = (p.inv.selected - e.y) % p.inv.BELT
                     g.sync_held()
 
     def key(self, k, e):
@@ -203,11 +221,12 @@ class UI:
             if m == "build" and pygame.K_1 <= k <= pygame.K_9:
                 pass
             if m == "inventory":
+                bagui.bag_key(self, k)
                 return
             if m != "build":
                 return
         if self.order_bar:
-            if k in (pygame.K_ESCAPE, pygame.K_c):
+            if k in (pygame.K_ESCAPE, pygame.K_x):
                 self.order_bar = False
             else:
                 self.order_key(k)
@@ -220,7 +239,8 @@ class UI:
             else:
                 self.open("pause")
         elif k == pygame.K_e:
-            g.interact()
+            if g.ctrl.shaping is None:
+                g.interact()
         elif k == pygame.K_i:
             self.open("inventory")
         elif k == pygame.K_b:
@@ -230,10 +250,12 @@ class UI:
         elif k == pygame.K_n:
             self.open("woerterbuch")
         elif k == pygame.K_r:
-            self.open("stand")
+            held = ITEMS.get(p.inv.held()) if p.inv.held() else None
+            if getattr(p, "carrying", None) is None and not (held is not None and held.cat == "place"):
+                self.open("stand")
         elif k in (pygame.K_h, pygame.K_F1):
             self.open("help")
-        elif k == pygame.K_c:
+        elif k == pygame.K_x:
             self.order_bar = True
         elif k == pygame.K_TAB:
             hs = p.haufen
@@ -265,9 +287,8 @@ class UI:
         elif k == pygame.K_t:
             # quick toggle: equip the next armour / shield in your bag
             self.cycle_gear()
-        elif pygame.K_0 <= k <= pygame.K_9:
-            i = (k - pygame.K_1) % 10
-            p.inv.selected = i
+        elif pygame.K_1 <= k <= pygame.K_4:
+            p.inv.selected = k - pygame.K_1
             g.sync_held()
 
     def cycle_gear(self):
@@ -294,7 +315,7 @@ class UI:
         g = self.g
         m = self.modal
         if m == "inventory":
-            self.inv_click(pos, button)
+            bagui.bag_click(self, pos, button)
         elif m == "trade":
             self.trade_click(pos, button)
         elif m == "build":
@@ -893,31 +914,14 @@ class UI:
                 self.bubble(surf, h, ox, oy)
         if p.bubble:
             self.bubble(surf, p, ox, oy)
-        # mining crack + cursor
-        mt = g.ctrl.mine_target
-        if mt:
-            tx, ty = mt
-            dmg = g.world.damage.get((tx, ty), 0)
-            td = T.TILES[int(g.world.fg[tx, ty])]
-            f = min(1.0, dmg / max(0.01, td.hardness))
-            r = pygame.Rect(tx * TILE - ox, ty * TILE - oy, TILE, TILE)
-            pygame.draw.rect(surf, (255, 255, 255), r, 1)
-            for k in range(int(f * 4)):
-                pygame.draw.line(surf, (20, 20, 20), (r.x + 2 + k * 3, r.y + 2), (r.x + 8 - k, r.bottom - 3), 1)
-            text(surf, f"{td.de} ({td.en})", (r.centerx, r.y - 18), 12, center=True)
-        if self.modal is None and self.build_sel is None:
+        if self.modal is None and self.build_sel is None and g.ctrl.shaping is None:
             mx, my = pygame.mouse.get_pos()
             z = getattr(g, "zoom", 1.0)
             wx, wy = mx / z + ox, my / z + oy
-            tx, ty = int(wx // TILE), int(wy // TILE)
-            if math.hypot(wx - p.cx, wy - p.cy) < 5.5 * TILE and g.world.inside(tx, ty):
-                tid = int(g.world.fg[tx, ty])
-                if tid:
-                    pygame.draw.rect(surf, (255, 255, 255), (tx * TILE - ox, ty * TILE - oy, TILE, TILE), 1)
-                    if not mt:
-                        td = T.TILES[tid]
-                        text(surf, f"{td.de} ({td.en})", (tx * TILE - ox + 8, ty * TILE - oy - 16), 11, center=True,
-                             color=(230, 220, 190))
+            if math.hypot(wx - p.cx, wy - p.cy) < 92:
+                label = self.hover_label(wx, wy)
+                if label:
+                    text(surf, label, (wx - ox, wy - oy - 22), 11, center=True, color=(230, 220, 190))
         # build ghost
         if self.build_sel is not None:
             bp = self.build_sel
@@ -930,6 +934,34 @@ class UI:
             pygame.draw.rect(surf, col[:3], (tx * TILE - ox, row * TILE - oy - 12 * TILE, bp.width * TILE, 12 * TILE), 1)
             cost = "  ".join(f"{ITEMS[k].de} {p.inv.count(k)}/{n}" for k, n in bp.cost.items())
             text(surf, f"{bp.de} ({bp.en}) — {cost}", (tx * TILE - ox, row * TILE - oy - 12 * TILE - 22), 13)
+
+    def hover_label(self, wx, wy):
+        from ..poly.prefab import piece_at
+        from ..poly.materials import MATS
+        from ..poly.objects import objects_near
+        w = self.g.world
+        for t in w.near("tree_chunks", wx - 60, wx + 60):
+            if t.state == "stand" and abs(t.x - wx) < t.tw / 2 + 10 and t.y - t.h * 0.6 < wy < t.y + 4:
+                de = {"oak": "Eiche", "beech": "Buche", "birch": "Birke", "pine": "Kiefer", "fir": "Tanne",
+                      "lime": "Linde", "willow": "Weide", "dead": "toter Baum"}.get(t.kind, "Baum")
+                return f"{de} — fell it with an Axt ({int(100 * t.hp / max(1, t.max_hp))}%)"
+        for o in objects_near(w, wx, wy, 6):
+            if o.shape is not None and o.shape.point_query((wx, wy)).distance < 4:
+                if o.kind == "log":
+                    return "Stamm (log) — E carry · Axt: cut · C shape"
+                nm = ITEMS[o.item].de if o.item in ITEMS else (o.name or MATS[o.mat].de)
+                if o.kind == "crafted" and o.shape_key:
+                    return f"{nm} — Güte {int(o.quality * 100)}%"
+                return nm
+        for ore in w.ores:
+            if ore["left"] > 0 and abs(ore["x"] - wx) < 14 and abs(ore["y"] - wy) < 14:
+                return {"coal": "Kohle", "iron": "Eisenerz", "silver": "Silbererz", "gold": "Golderz",
+                        "salt": "Salz", "glutstein": "Glutstein", "stone": "Stein"}[ore["kind"]] + " — Spitzhacke"
+        pc = piece_at(w, wx, wy)
+        if pc is not None and pc.solid:
+            m = MATS[pc.mat]
+            return f"{m.de} ({m.en}) {int(100 * pc.hp / max(1, pc.max_hp))}%"
+        return None
 
     def bubble(self, surf, h, ox, oy):
         line, t, _ = h.bubble
@@ -963,7 +995,9 @@ class UI:
         elif m == "trade":
             self.draw_trade(surf)
         elif m == "inventory":
-            self.draw_inventory(surf)
+            bagui.draw_bag(self, surf)
+        elif m == "lab" and getattr(self, "lab", None) is not None:
+            self.lab.draw(surf)
         elif m == "build":
             self.draw_build(surf)
         elif m == "map":
@@ -1039,19 +1073,37 @@ class UI:
             surf.blit(sub, (SCREEN_W // 2 - sub.get_width() // 2, 122))
         text(surf, f"{loc} — {realm}", (SCREEN_W - 280, 68), 11, (170, 170, 160))
         # hotbar
-        hb_w = 10 * 46
+        nb = p.inv.BELT
+        hb_w = nb * 50 + 120
         x0 = SCREEN_W // 2 - hb_w // 2
         y0 = SCREEN_H - 56
-        for i in range(10):
-            rr = pygame.Rect(x0 + i * 46, y0, 42, 42)
+        # the belt: four things within reach
+        pygame.draw.rect(surf, (92, 64, 40), (x0 - 8, y0 + 16, nb * 50 + 14, 10), border_radius=4)
+        for i in range(nb):
+            rr = pygame.Rect(x0 + i * 50, y0, 44, 44)
             sel = i == p.inv.selected
             panel(surf, rr, 200 if sel else 150, border=GOLD if sel else (90, 80, 60))
-            s_ = p.inv.slots[i]
-            if s_:
-                item_icon(surf, s_[0], rr)
-                if s_[1] > 1:
-                    text(surf, str(s_[1]), (rr.right - 4, rr.bottom - 15), 11, right=True)
-            text(surf, str((i + 1) % 10), (rr.x + 3, rr.y + 1), 10, (160, 150, 130))
+            k_ = p.inv.belt[i]
+            if k_ and p.inv.count(k_):
+                item_icon(surf, k_, rr)
+                n_ = p.inv.count(k_)
+                if n_ > 1:
+                    text(surf, str(n_), (rr.right - 4, rr.bottom - 15), 11, right=True)
+            text(surf, str(i + 1), (rr.x + 3, rr.y + 1), 10, (160, 150, 130))
+        # the bag
+        br = pygame.Rect(x0 + nb * 50 + 16, y0 - 4, 96, 50)
+        pygame.draw.ellipse(surf, (110, 84, 56), br.inflate(-30, -6))
+        pygame.draw.polygon(surf, (92, 70, 46), [(br.x + 26, br.y + 8), (br.right - 26, br.y + 8),
+                                                 (br.centerx, br.y - 2)])
+        wfrac = p.inv.weight() / p.inv.capacity
+        text(surf, f"{p.inv.weight():.0f}/{p.inv.capacity:.0f}kg", (br.centerx, br.y + 18), 10,
+             (240, 220, 180) if wfrac < 0.9 else (240, 140, 110), center=True)
+        text(surf, "I", (br.centerx, br.bottom - 14), 10, (180, 170, 150), center=True)
+        if getattr(p, "carrying", None) is not None:
+            o = p.carrying
+            nm = ITEMS[o.item].de if o.item in ITEMS else "Stamm"
+            ltext(surf, f"carrying: {nm} — click to set down (Shift: fix in place), R rotate, G throw",
+                  (SCREEN_W // 2, y0 - 40), 12, (236, 226, 200), center=True)
         held = p.inv.held()
         if held:
             d = ITEMS[held]
@@ -1074,7 +1126,7 @@ class UI:
                 text(surf, f"{'▸' if sel else ' '} {h.unit.de}: {h.count} · {od} · Moral {int(max(0, h.morale))}",
                      (20, yy), 12, (240, 220, 150) if sel else (200, 200, 190))
                 yy += 18
-            text(surf, "C = Befehle (orders) · Tab = select", (20, yy + 2), 10, (150, 150, 140))
+            text(surf, "X = Befehle (orders) · Tab = select", (20, yy + 2), 10, (150, 150, 140))
         # messages
         y = SCREEN_H - 120
         for line, t in reversed(self.g.messages[-4:]):
@@ -1500,12 +1552,14 @@ class UI:
             ("", "crouching = low sweep (and Konter after a block), in the air = plunge"),
             ("Mouse R / K", "block — tap just before a hit to PARRY (stuns the attacker, no stamina)"),
             ("Bow", "hold L to draw, aim with the mouse, release · V = fire arrows · wind & rain matter"),
-            ("Tools", "pickaxe/axe in hand + hold L on a tile to mine/chop · blocks in hand: click to place"),
-            ("E", "talk · doors & gates · chests · beds · mount horse · board boat · harvest · pray · signs"),
-            ("1-0 / wheel", "hotbar · Q = drop · T = cycle shield/armour/helmet from your bag"),
-            ("I", "inventory & crafting (stand near Werkbank / Amboss / Ofen / Webstuhl)"),
-            ("B", "blueprints: huts, walls, gates, towers, chapels, halls, castles"),
-            ("C / Tab / Z", "orders bar for your Haufen · Tab = select formation · Z = commander's zoomed-out view"),
+            ("Hands", "axe on a tree: fell it · axe on a trunk: cut it · hammer/pick on a wall: break it · pick on ore"),
+            ("E", "pick up (small → bag, big → arms) · set down · doors · chests · beds · Werkbank · talk · mount"),
+            ("Carrying", "click: set it down where you point · Shift+click: fix it in place · R rotate · G throw"),
+            ("C", "shape the log at your feet: Q/E choose a form, drag axe strokes along the dashed lines, Enter"),
+            ("1-4 / wheel", "belt · Q = drop · T = cycle shield/armour/helmet from your bag"),
+            ("I", "the Rucksack (bag) & crafting · Werkbank (E): shape wood precisely with the mouse"),
+            ("B", "blueprints: huts, walls, gates, towers, chapels, halls, castles — raised piece by piece"),
+            ("X / Tab / Z", "orders bar for your Haufen · Tab = select formation · Z = commander's zoomed-out view"),
             ("M", "world map, politics, fast travel by cart"),
             ("N", "Wörterbuch — every German word you've heard · Q = quiz"),
             ("R", "Ständeordnung — the social ladder and how to climb it"),
@@ -1513,7 +1567,7 @@ class UI:
             ("F5 / F9", "save / load · Esc = pause"),
             ("Tactics", "Schildwall vs arrows · Igel (pikes) vs horses · Keil to break a line · Locker vs volleys"),
             ("", "Wechsel rotates tired front men · Flank a Haufen from behind to cut down its reserves"),
-            ("World", "Fall into the Abyss and the sky spits you out elsewhere. Dig under walls and they collapse."),
+            ("World", "Fall into the Abyss and the sky spits you out elsewhere. Break what holds a wall up: it falls."),
         ]
         y = r.y + 64
         for k, v in lines:

@@ -1,7 +1,6 @@
 """Recipes. Stations must be within reach: Werkbank, Amboss+Esse, Ofen, Webstuhl."""
 from dataclasses import dataclass
 
-from ..world import tiles as T
 
 
 @dataclass
@@ -12,16 +11,16 @@ class Recipe:
     station: str = None   # None / workbench / smithy / oven / loom / campfire
 
 
-STATION_TILES = {
-    "workbench": (T.WORKBENCH.id, T.TABLE.id),
-    "smithy": (T.ANVIL.id,),
-    "oven": (T.OVEN.id, T.FORGE.id),
-    "loom": (T.LOOM.id,),
-    "campfire": (T.FIRE_PIT.id, T.FORGE.id, T.OVEN.id),
+# which fittings count as which workshop
+STATION_DECOR = {
+    "workbench": ("workbench", "table"),
+    "smithy": ("anvil",),
+    "oven": ("oven", "forge"),
+    "loom": ("loom",),
+    "campfire": ("campfire", "hearth", "forge", "oven"),
 }
 
 RECIPES = [
-    Recipe("planks", 4, {"wood": 1}),
     Recipe("verband", 3, {"cloth": 1}),
     Recipe("stuetze", 3, {"wood": 2}, "workbench"),
     Recipe("pech", 2, {"wood": 3, "coal": 1}, "oven"),
@@ -33,23 +32,19 @@ RECIPES = [
     Recipe("torch", 2, {"wood": 2}),
     Recipe("campfire", 1, {"wood": 5, "stone": 3}),
     Recipe("knueppel", 1, {"wood": 3}),
-    Recipe("platform", 4, {"planks": 2}, "workbench"),
-    Recipe("ladder", 2, {"planks": 3}, "workbench"),
-    Recipe("door", 1, {"planks": 6}, "workbench"),
     Recipe("chest", 1, {"planks": 8, "iron_ingot": 1}, "workbench"),
     Recipe("table", 1, {"planks": 6}, "workbench"),
     Recipe("bed", 1, {"planks": 6, "wool": 4}, "workbench"),
     Recipe("barrel", 1, {"planks": 5}, "workbench"),
-    Recipe("palisade", 2, {"wood": 3}, "workbench"),
     Recipe("fachwerk", 4, {"planks": 2, "clay": 2}, "workbench"),
     Recipe("straw", 4, {"wheat": 2}),
-    Recipe("mistgabel", 1, {"wood": 4, "iron_ingot": 1}, "workbench"),
+    Recipe("mistgabel", 1, {"shaft": 1, "iron_ingot": 1}, "smithy"),
     Recipe("flegel", 1, {"wood": 5, "rope": 1}, "workbench"),
-    Recipe("bogen", 1, {"wood": 4, "rope": 2}, "workbench"),
+    Recipe("bogen", 1, {"shaft": 1, "rope": 2}, "workbench"),
     Recipe("arrow", 10, {"wood": 2, "stone": 1}, "workbench"),
     Recipe("fire_arrow", 5, {"arrow": 5, "coal": 1, "straw": 1}, "workbench"),
     Recipe("holzschild", 1, {"planks": 6, "leather": 1}, "workbench"),
-    Recipe("speer", 1, {"wood": 4, "iron_ingot": 1}, "workbench"),
+    Recipe("speer", 1, {"shaft": 1, "iron_ingot": 1}, "smithy"),
     Recipe("loom", 1, {"planks": 10, "rope": 2}, "workbench"),
     Recipe("rope", 2, {"wheat": 3}, "workbench"),
     Recipe("brick", 4, {"stone": 4}, "workbench"),
@@ -71,7 +66,7 @@ RECIPES = [
     Recipe("spitzhacke", 1, {"wood": 2, "iron_ingot": 2}, "smithy"),
     Recipe("hammer", 1, {"wood": 2, "iron_ingot": 1}, "smithy"),
     Recipe("sichel", 1, {"wood": 1, "iron_ingot": 1}, "smithy"),
-    Recipe("axt", 1, {"wood": 2, "iron_ingot": 2}, "smithy"),
+    Recipe("axt", 1, {"handle": 1, "iron_ingot": 2}, "smithy"),
     Recipe("dolch", 1, {"iron_ingot": 1, "leather": 1}, "smithy"),
     Recipe("schwert", 1, {"iron_ingot": 3, "leather": 1}, "smithy"),
     Recipe("langschwert", 1, {"iron_ingot": 5, "leather": 1}, "smithy"),
@@ -93,14 +88,20 @@ RECIPES = [
 
 
 def stations_near(world, tx, ty, radius=4):
+    """Workshops within a few steps: fittings of buildings and stations you placed yourself."""
+    px = tx * 16 + 8
     found = set()
-    for x in range(tx - radius, tx + radius + 1):
-        for y in range(ty - radius, ty + radius + 1):
-            if world.inside(x, y):
-                t = int(world.fg[x, y])
-                for name, ids in STATION_TILES.items():
-                    if t in ids:
-                        found.add(name)
+    r = radius * 16 + 24
+    for d in world.near("decor_chunks", px - r, px + r):
+        if abs(d.x - px) < r and not d.gone:
+            for st, kinds in STATION_DECOR.items():
+                if d.kind in kinds:
+                    found.add(st)
+    for o in world.objects:
+        if abs(o.x - px) < r and o.shape_key:
+            for st, kinds in STATION_DECOR.items():
+                if o.shape_key in kinds:
+                    found.add(st)
     return found
 
 

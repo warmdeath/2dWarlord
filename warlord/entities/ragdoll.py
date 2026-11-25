@@ -1,74 +1,122 @@
-"""Verlet ragdoll: when a fighter falls, the same skeleton that animated them becomes a chain of
-physical points with stick constraints that tumbles, slides and settles on the tile world."""
+"""Ragdolls with real joints: when a fighter falls, every bone of the skeleton that animated them becomes a
+rigid capsule in the physics world, pinned to its neighbours at the joints. They tumble down slopes, drape
+over walls and logs, and settle. After a while a ragdoll is frozen into a still pose to keep battles cheap."""
 import math
 
-from ..settings import TILE
-from ..world import tiles as T
-from ..gfx.rig import STICKS
+import pymunk
 
-GRAVITY = 1500.0
+from ..gfx.rig import STICKS
+from ..poly.world import F_DEBRIS
+
+BONES = (("hip", "sh", 4.5), ("sh", "head", 3.5), ("hip", "kb", 3.0), ("kb", "fb", 2.6), ("hip", "kf", 3.0),
+         ("kf", "ff", 2.6), ("sh", "eb", 2.4), ("eb", "hb", 2.1), ("sh", "ef", 2.4), ("ef", "hf", 2.1))
+LIMITS = {("sh", "head"): 0.9, ("kb", "fb"): 2.2, ("kf", "ff"): 2.2, ("eb", "hb"): 2.4, ("ef", "hf"): 2.4}
+MAX_ACTIVE = 36
+_active = []
 
 
 class Ragdoll:
     def __init__(self, joints, vel=(0.0, 0.0), spin=0.0, dt=1 / 60):
-        vx, vy = vel
-        self.points = {}
-        for k, (x, y) in joints.items():
-            # the upper body gets more of the blow so bodies topple instead of sliding
-            boost = 1.0 + (0.6 if k in ("head", "sh", "eb", "ef", "hb", "hf") else 0.0)
-            ex = spin if k in ("head", "sh") else 0.0
-            self.points[k] = [x, y, x - (vx * boost + ex) * dt, y - vy * dt]
-        self.sticks = []
-        for a, b in STICKS:
-            pa, pb = self.points[a], self.points[b]
-            self.sticks.append((a, b, max(1.0, math.hypot(pa[0] - pb[0], pa[1] - pb[1]))))
+        self.points = {k: [x, y, x, y] for k, (x, y) in joints.items()}
+        self.vel = vel
+        self.spin = spin
         self.t = 0.0
         self.asleep = False
+        self.bodies = None
+        self.world = None
+        self.sticks = [(a, b, 1.0) for a, b in STICKS]
 
-    def _collide(self, world, p):
-        tx, ty = int(p[0] // TILE), int(p[1] // TILE)
-        if world.inside(tx, ty) and (T.SOLID[world.fg[tx, ty]]):
-            top = ty * TILE - 0.2
-            if p[3] <= top + 0.5:          # came from above: rest on the surface with friction
-                p[1] = top
-                p[2] = p[0] - (p[0] - p[2]) * 0.6
-                p[3] = p[1] + (p[1] - p[3]) * 0.2
-            else:                          # from the side: push back out
-                p[0] = p[2]
+    def __getstate__(self):
+        d = self.__dict__.copy()
+        d["bodies"] = None
+        d["world"] = None
+        d["asleep"] = True
+        return d
+
+    def _build(self, world):
+        sp = world.space
+        P = {k: (v[0], v[1]) for k, v in self.points.items()}
+        vx, vy = self.vel
+        self.bodies = []
+        self.bone_of = {}
+        owner_of = {}
+        for a, b, r in BONES:
+            (ax, ay), (bx, by) = P[a], P[b]
+            L = max(2.0, math.hypot(bx - ax, by - ay))
+            mass = 1.0 + L * 0.08
+            body = pymunk.Body(mass, pymunk.moment_for_segment(mass, (-L / 2, 0), (L / 2, 0), r))
+            body.position = ((ax + bx) / 2, (ay + by) / 2)
+            body.angle = math.atan2(by - ay, bx - ax)
+            boost = 1.6 if a in ("sh", "eb", "ef") or b == "head" else 1.0
+            body.velocity = (vx * boost + (self.spin if b == "head" else 0), vy)
+            sh = pymunk.Segment(body, (-L / 2, 0), (L / 2, 0), r)
+            sh.friction = 0.9
+            sh.elasticity = 0.05
+            sh.filter = pymunk.ShapeFilter(group=id(self) & 0x7FFFFFFF, categories=F_DEBRIS.categories,
+                                           mask=F_DEBRIS.mask)
+            sp.add(body, sh)
+            self.bodies.append((a, b, body, L))
+            self.bone_of[(a, b)] = body
+            owner_of.setdefault(a, (body, -L / 2))
+            owner_of.setdefault(b, (body, L / 2))
+        # pin every bone to the bone that owns its start joint
+        self.joints = []
+        for a, b, body, L in self.bodies:
+            for k, end in ((a, -L / 2), (b, L / 2)):
+                ob, oe = owner_of[k]
+                if ob is body:
+                    continue
+                j = pymunk.PivotJoint(ob, body, (oe, 0), (end, 0))
+                j.collide_bodies = False
+                sp.add(j)
+                self.joints.append(j)
+                lim = LIMITS.get((a, b))
+                if lim and k == a:
+                    rl = pymunk.RotaryLimitJoint(ob, body, -lim, lim)
+                    sp.add(rl)
+                    self.joints.append(rl)
+        self.world = world
+        _active.append(self)
+        while len(_active) > MAX_ACTIVE:
+            _active[0].freeze()
+
+    def freeze(self):
+        if self in _active:
+            _active.remove(self)
+        if self.bodies is not None and self.world is not None:
+            self._sync()
+            sp = self.world.space
+            present = set(sp.constraints)
+            for j in self.joints:
+                if j in present:
+                    sp.remove(j)
+            bodies = set(sp.bodies)
+            for a, b, body, L in self.bodies:
+                if body in bodies:
+                    sp.remove(body, *list(body.shapes))
+        self.bodies = []
+        self.asleep = True
+
+    def _sync(self):
+        for a, b, body, L in self.bodies:
+            pa = body.local_to_world((-L / 2, 0))
+            pb = body.local_to_world((L / 2, 0))
+            if a in ("hip",) or (a == "sh" and b == "head") or a not in self.points or True:
+                self.points[a][0], self.points[a][1] = pa.x, pa.y
+            self.points[b][0], self.points[b][1] = pb.x, pb.y
 
     def update(self, world, dt):
         if self.asleep:
             return
-        dt = min(dt, 1 / 30)
-        moved = 0.0
-        for p in self.points.values():
-            x, y, ox, oy = p
-            vx = (x - ox) * 0.992
-            vy = (y - oy) * 0.992
-            tx, ty = int(x // TILE), int(y // TILE)
-            if world.inside(tx, ty) and world.liq[tx, ty] > 3:
-                vx *= 0.9
-                vy = vy * 0.9 - 6 * dt * dt * GRAVITY * 0.05
-            p[2], p[3] = x, y
-            p[0] = x + vx
-            p[1] = y + vy + GRAVITY * dt * dt
-            moved += abs(vx) + abs(vy)
-            self._collide(world, p)
-        for _ in range(4):
-            for a, b, length in self.sticks:
-                pa, pb = self.points[a], self.points[b]
-                dx, dy = pb[0] - pa[0], pb[1] - pa[1]
-                d = math.hypot(dx, dy) or 0.001
-                diff = (d - length) / d * 0.5
-                pa[0] += dx * diff
-                pa[1] += dy * diff
-                pb[0] -= dx * diff
-                pb[1] -= dy * diff
-            for p in self.points.values():
-                self._collide(world, p)
+        if self.bodies is None:
+            self._build(world)
+        if not self.bodies:
+            return
+        self._sync()
         self.t += dt
-        if self.t > 6 or (self.t > 1.2 and moved < 0.4):
-            self.asleep = True
+        moving = sum(body.velocity.length for _, _, body, _ in self.bodies)
+        if self.t > 12 or (self.t > 2.0 and moving < 25):
+            self.freeze()
 
     def anchor(self):
         h = self.points["hip"]

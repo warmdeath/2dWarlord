@@ -40,7 +40,7 @@ class App:
         self.scene = Menu(self)
 
     def start_sandbox(self, size="gross", seed=1300):
-        from ..world.generator import generate
+        from ..poly.gen import generate
         from ..modes.session import Session
         out = {}
 
@@ -59,7 +59,7 @@ class App:
         self.scene = Loading(self, generate(WORLD_SIZES[size], seed, out), done)
 
     def start_story(self):
-        from ..world.generator import generate
+        from ..poly.gen import generate
         from ..modes.session import Session
         from ..modes.story import Story
         out = {}
