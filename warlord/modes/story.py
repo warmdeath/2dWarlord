@@ -405,12 +405,15 @@ class Story:
             s.update_lod(0.0)
             colors = BY_KEY["waldheim"]["colors"]
             hx = x - 40
-            for unit, n in (("schild", 18), ("speer", 20), ("armbrust", 12)):
+            for unit, n in (("schild", 18), ("leiter", 16), ("armbrust", 12)):
                 hf = Haufen(s, "player", unit, n, hx, 1, colors, leader=p)
                 hf.order = "halt"
                 s.formations.append(hf)
                 p.haufen.append(hf)
                 hx -= hf.width() + 30
+            ram = s.spawn_engine("ramm", x + 120, "player", 1, colors)
+            ram.active = False
+            ram.keep = True
             u = self.spawn_npc("ulrich", "Ritter Ulrich", x + 30, rank=4, job="knight",
                                gear=("langschwert", "", "plattenrock", "topfhelm"), faction="player",
                                brain="follow", kingdom="waldheim")
@@ -435,8 +438,9 @@ class Story:
                 hf.no_advance = True
                 s.formations.append(hf)
             s.society.wanted.discard("bandit")
-            s.ui.toast("Schwarzfels. Press C and order [Angriff|charge] to hack down the [Tor|gate] — or dig "
-                       "under the wall.", 8)
+            s.ui.toast("Schwarzfels: a [Graben|moat] and a [Zugbrücke|drawbridge]. Order [Vorwärts|forward] (C): "
+                       "your men fill the moat, the [Leiterträger|ladder men] climb. E at the [Rammbock|ram] sends it "
+                       "against the gate.", 10)
         elif a == "knighting":
             p.rank = max(p.rank, 4)
             p.liege = "randmark"
@@ -526,6 +530,11 @@ class Story:
                 s.formations.append(hf)
                 self.glut.append(hf)
                 ex += hf.width() + 30
+            for k in range(2):
+                gun = s.spawn_engine("buechse", ex + 80 + k * 70, "glutmark", -1, ocol)
+                gun.active = True
+            s.ui.toast("Otto brings [Donnerbüchsen|thunder-guns] — iron pots that roar fire. Hit them before they "
+                       "find their range!", 8)
             p.liege = "heiligenstein" if p.liege is None else p.liege
             s.society.declare_war("glutmark", p.liege)
             s.society.wars.add(frozenset(("glutmark", "heiligenstein")))

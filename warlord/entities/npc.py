@@ -119,6 +119,12 @@ class CombatBrain(Brain):
         t = self.target
         if t is None:
             return
+        leash = getattr(h, "leash", None)
+        if leash is not None and abs(t.cx - leash[0]) > leash[1]:
+            # a wall guard does not leave his post to chase
+            walk_to(h, game, leash[0], tol=10)
+            h.facing = 1 if t.cx > h.cx else -1
+            return
         if h.hp < h.max_hp * 0.22 and not getattr(h, "brave", False) and random.random() < dt:
             game.set_brain(h, "flee", threat=t)
             return
@@ -407,7 +413,7 @@ class LifeBrain(Brain):
         w = game.world
         if job == "farmer":
             # walk along the field, harvest ripe wheat and sow again
-            fx0, fx1 = p.field or (p.work_x // TILE - 4, p.work_x // TILE + 4)
+            fx0, fx1 = p.field or (int(p.work_x // TILE) - 4, int(p.work_x // TILE) + 4)
             if self.task is None or self.task[0] != "field":
                 self.task = ("field", random.randint(fx0, fx1))
             tx = self.task[1]
@@ -420,12 +426,18 @@ class LifeBrain(Brain):
                     y = g - 1
                     if w.inside(tx, y):
                         t = int(w.fg[tx, y])
-                        if t == T.WHEAT4.id:
-                            w.set(tx, y, T.WHEAT1.id)
-                            game.settlement_produce(p, "wheat", 2)
+                        fert = w.fert.get((tx, g), 1.0)
+                        if t in T.RIPE:
+                            crop = T.CROP_OF[t][0]
+                            fert = max(0.15, fert - 0.25)
+                            w.fert[(tx, g)] = fert
+                            # Dreifelderwirtschaft: tired soil is left fallow (Brache) to recover
+                            w.set(tx, y, T.CROPS[crop][0] if fert >= 0.45 else 0)
+                            game.settlement_produce(p, {"oat": "oats"}.get(crop, crop), 2)
                             game.fx.debris(tx * TILE + 8, y * TILE + 8, (222, 190, 84), 4)
-                        elif t == 0 and w.fg[tx, g] == T.FARMLAND.id:
-                            w.set(tx, y, T.WHEAT1.id)
+                        elif t == 0 and w.fg[tx, g] == T.FARMLAND.id and fert >= 0.7:
+                            crop = getattr(p, "crop", None) or "wheat"
+                            w.set(tx, y, T.CROPS[crop][0])
                     self.task = ("field", random.randint(fx0, fx1))
             return
         if job == "woodcutter":
@@ -539,5 +551,37 @@ class IdleBrain(Brain):
                 game.hear(line, "story")
 
 
-BRAINS = {"idle": IdleBrain, "life": LifeBrain, "combat": CombatBrain, "formation": FormationBrain, "follow": FollowerBrain,
+class ClimbBrain(Brain):
+    """Up the Sturmleiter, over the parapet, then fight."""
+    kind = "climb"
+
+    def __init__(self, h):
+        super().__init__(h)
+        self.t = 0.0
+
+    def think(self, game, dt):
+        h = self.h
+        it = h.intent
+        it.clear()
+        self.t += dt
+        tgt = getattr(h, "climb_target", None)
+        if tgt is None or self.t > 18:
+            game.set_brain(h, "combat")
+            return
+        lx, top, wx = tgt
+        feet_row = int((h.feet - 1) // TILE)
+        side = 1 if wx > lx else -1
+        if feet_row > top:
+            if abs(h.cx - (lx * TILE + 8)) > 4 and not h.climbing:
+                walk_to(h, game, lx * TILE + 8, tol=3)
+            else:
+                it.up = True
+        else:
+            it.mx = side
+            it.up = True
+            if h.on_ground and abs(h.cx - (lx * TILE + 8)) > 14:
+                game.set_brain(h, "combat")
+
+
+BRAINS = {"climb": ClimbBrain, "idle": IdleBrain, "life": LifeBrain, "combat": CombatBrain, "formation": FormationBrain, "follow": FollowerBrain,
           "flee": FleeBrain}

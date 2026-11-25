@@ -39,6 +39,11 @@ UNITS = {
                         "kettenhaube", 0.7, cavalry=True, cost=30, role="Fast. Hunt archers, ride down the routed."),
     "ritter": UnitType("ritter", "Ritter", "knights", ("lanze",), "dreieckschild", "plattenrock", "topfhelm", 0.95,
                        cavalry=True, cost=60, role="The charge that ends battles — unless it meets a hedge of pikes."),
+    "leiter": UnitType("leiter", "Leiterträger", "ladder men", ("axt", "schwert", "streitkolben"), "holzschild",
+                       "gambeson", "kettenhaube", 0.55, cost=12,
+                       role="Carry Sturmleitern: raise them against a wall and climb, one man at a time."),
+    "mineure": UnitType("mineure", "Mineure", "sappers", ("spitzhacke",), None, "gambeson", "eisenhut", 0.5, cost=14,
+                        role="Dig under a wall, prop it on timber, then burn the props. The wall falls."),
     "raeuber": UnitType("raeuber", "Räuberbande", "robber band", ("axt", "knueppel", "dolch", "schwert"), "holzschild",
                         "gambeson", None, 0.45, cost=0, role="Robber knights' rabble."),
 }

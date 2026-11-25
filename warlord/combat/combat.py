@@ -1,7 +1,10 @@
 """Melee and missile resolution, bracing against charges."""
 import math
 
+import random
+
 from ..settings import TILE, RUN_SPEED
+from . import injury as INJ
 
 
 def _rect_overlap(a, b):
@@ -52,7 +55,7 @@ class CombatSystem:
                 att.hit_ids.add(t.uid)
                 continue
             att.hit_ids.add(t.uid)
-            dmg = wd.dmg * mv.dmg * att.strength
+            dmg = wd.dmg * mv.dmg * att.strength * INJ.damage_factor(att)
             if mv is wd.moves.get("run") and att.mount is None:
                 dmg *= 1.0 + min(1.0, abs(att.vx) / RUN_SPEED) * 0.25
             if att.mount is not None:
@@ -67,13 +70,29 @@ class CombatSystem:
                 flags = flags + ("unblockable",) if t.y > att.y + 10 else flags
             high = mv.arc in ("swing", "backswing", "overhead", "plunge")
             if hasattr(t, "take_hit"):
-                res = t.take_hit(g, att, dmg, wd.dtype, wd.posture * mv.posture, flags, high=high)
+                if mv.arc == "overhead" or mv.arc == "plunge":
+                    hy = t.y + t.h * random.uniform(0.0, 0.45)
+                elif mv.arc == "low":
+                    hy = t.y + t.h * random.uniform(0.55, 0.95)
+                else:
+                    hy = max(t.y, min(t.y + t.h - 1, r[1] + r[3] * random.uniform(0.2, 0.85)))
+                res = t.take_hit(g, att, dmg, wd.dtype, wd.posture * mv.posture, flags, high=high, hit_y=hy,
+                                 pen=INJ.PEN.get(wd.key, 3) + (1 if att.mount is not None else 0))
                 if res in ("hit", "block"):
                     g.hitstop(0.035 if res == "hit" else 0.02)
                     if res == "hit":
                         g.camera.shake = max(g.camera.shake, 2.5)
                 if res == "parry":
                     return
+        # siege engines can be hacked apart (axes best) or set alight with torches
+        for e in getattr(g, "engines", []):
+            if e.dead or e.uid in att.hit_ids or not g.hostile_factions(att.faction, e.side):
+                continue
+            ex, ey, ew, eh = e.rect(g)
+            if _rect_overlap(r, (ex, ey, ew, eh)):
+                att.hit_ids.add(e.uid)
+                e.damage(g, wd.dmg * mv.dmg * (1.8 if wd.key == "axt" else 0.6), 0.25 if e.key != "ramm" else 0.08,
+                         fire="fire" in wd.flags)
         # tools & torches interact with tiles
         if "fire" in wd.flags:
             tx = int((att.cx + att.facing * mv.reach * 0.8) // TILE)
@@ -129,17 +148,36 @@ class CombatSystem:
                 high = p.y < t.y + 12
                 flags = ("armorpierce",) if p.kind == "bolt" else ()
                 if hasattr(t, "take_hit"):
-                    res = t.take_hit(g, p.owner, dmg, "pierce", 6, flags, high=high, source_x=p.x - p.vx * 0.05,
-                                     arrow=True)
+                    pen = INJ.PEN.get(p.kind, 5) * min(1.2, speed / 700.0)
+                    res = t.take_hit(g, p.owner, dmg, "pierce" if p.kind != "ball" else "blunt", 6, flags, high=high,
+                                     source_x=p.x - p.vx * 0.05, arrow=True, hit_y=p.y, pen=pen)
                     if res == "block":
                         g.fx.text(t.cx, t.y - 8, "Tock!", (220, 200, 160))
                 if p.fire and hasattr(t, "burning"):
                     t.burning = 3.0
                 p.removed = True
                 return True
+        for e in getattr(g, "engines", []):
+            if e.dead or not g.hostile_factions(p.faction, e.side) or not e.contains(g, p.x, p.y):
+                continue
+            if p.kind in ("stone", "ball"):
+                e.damage(g, 80, 0.5)
+            else:
+                roofed = e.key in ("ramm", "turm")
+                e.damage(g, 2, 0.04 if roofed else 0.18, fire=p.fire)
+            p.removed = True
+            return True
         for hf in g.formations:
             if hf.side == p.faction or hf.dead:
                 continue
+            if p.kind in ("stone", "ball") and hf.contains(p.x, p.y + 10):
+                for _ in range(random.randint(2, 5) if p.kind == "stone" else random.randint(2, 4)):
+                    hf._kill_member(p.x)
+                hf.morale -= 8
+                from . import siege
+                siege.impact(g, p.x, p.y + 8, p.kind)
+                p.removed = True
+                return True
             if not g.hostile_factions(p.faction, hf.side, p.owner, None):
                 continue
             if hf.contains(p.x, p.y):

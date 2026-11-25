@@ -8,7 +8,7 @@ Tokens: {addr} = how they address you by rank, {you} = du/Ihr (informal/formal),
 import random
 import re
 
-TOKEN = re.compile(r"\[([^\]|]+)\|([^\]]+)\]")
+TOKEN = re.compile(r"\[([^\]|]+)\|([^\]]*)\]")
 
 LINES = {
     "greet_morning": [
@@ -217,6 +217,8 @@ class Woerterbuch:
         new = []
         for de, en in gl:
             e = self.words.get(de)
+            if not en:
+                en = e[0] if e else ""
             if e is None:
                 self.words[de] = [en, 1, context]
                 new.append((de, en))

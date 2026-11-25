@@ -44,7 +44,9 @@ class Menu:
             return [("Die Furt", "The Ford — hold the river crossing against a larger host", "b_ford"),
                     ("Die Klause", "The Pass — a gate in the mountains, a few against many", "b_pass"),
                     ("Offene Feldschlacht", "Open field — knights, pikes and bows", "b_field"),
-                    ("Die Belagerung", "The Siege — storm the robber knight's castle", "b_siege"),
+                    ("Die Belagerung", "The Siege — moat, ram, trebuchet, ladders, sappers", "b_siege"),
+                    ("Die Verteidigung", "The Defence — hold your castle against Otto's thunder-guns",
+                     "b_verteidigung"),
                     ("Zurück", "back", "back")]
         return []
 

@@ -16,7 +16,8 @@ from ..society.kingdoms import KINGDOMS, BY_KEY, BIOME_NAMES
 from ..combat.weapons import WEAPONS, SHIELDS, ARMORS, HELMET_NAMES
 from ..combat.units import UNITS
 from ..gfx.rig import draw_humanoid
-from .common import font, text, panel, parchment, bilingual, bar, item_icon
+from .common import font, text, panel, parchment, bilingual, bar, item_icon, ltext
+from ..society import lingua
 
 SELL_LISTS = {
     "merchant": ["bread", "cheese", "fish", "salt", "beer", "wine", "wood", "planks", "stone", "brick", "straw",
@@ -83,6 +84,7 @@ class UI:
         return self.modal is not None or self.order_bar
 
     def toast(self, line, t=4.0):
+        line = lingua.get().weave(line)
         self.toasts.append([line, t])
         self.toasts = self.toasts[-3:]
 
@@ -112,6 +114,7 @@ class UI:
         self.g.sfx("ui")
 
     def show_card(self, title, lines, on_close=None, subtitle=None):
+        lines = [lingua.get().weave(x) for x in lines]
         self.card = {"title": title, "lines": lines, "on_close": on_close, "subtitle": subtitle}
         self.modal = "card"
         for line in lines:
@@ -370,6 +373,7 @@ class UI:
         self.build_options()
 
     def set_line(self, line):
+        line = lingua.get().weave(line)
         self.dlg_line = line
         self.g.hear(line, "talk")
 
@@ -405,6 +409,8 @@ class UI:
                 opts.append(("[Freiheit erkaufen|buy freedom] (100 Pf)", "free", self.opt_freedom))
             opts.append(("[Lehnseid schwören|swear fealty]", "fealty", self.opt_fealty))
             opts.append(("[Um ein Lehen bitten|ask for a fief]", "fief", self.opt_fief))
+        if person and person.job in ("priest", "monk") and (g.player.injury or g.player.hp < g.player.max_hp):
+            opts.append(("[Heilen lassen|be healed] (5 Pf)", "heal", self.opt_heal))
         if person and person.job in ("carter",):
             opts.append(("[Fahrt|ride] → map", "travel", lambda: self.open("map")))
         if g.story is not None:
@@ -419,6 +425,18 @@ class UI:
         cats = [person.job if person else "rumor", "rumor", g.greeting_category()]
         line = D.pick(g.rng.choice(cats), g.npc_ctx(self.npc), g.rng) or D.pick("rumor", g.npc_ctx(self.npc), g.rng)
         self.set_line(line)
+
+    def opt_heal(self):
+        from ..combat import injury as INJ
+        p = self.g.player
+        if p.inv.money < 5:
+            self.set_line("A small [Spende|donation] for the [Kloster|monastery], please.")
+            return
+        p.inv.money -= 5
+        INJ.rest(p, 24)
+        p.bandaged = True
+        p.hp = p.max_hp
+        self.set_line("[Gott|God] heals, I only bind the [Wunden|wounds]. Go in [Frieden|peace].")
 
     def opt_trade(self):
         self.modal = "trade"
@@ -754,6 +772,14 @@ class UI:
             self.toast("Not on another lord's land! Build on your own [Lehen|fief] or in the wild.", 3)
             return
         p.inv.take(bp.cost)
+        if bp.engine:
+            e = g.spawn_engine(bp.engine, (tx + bp.width / 2) * TILE, "player", p.facing,
+                               BY_KEY[p.liege]["colors"] if p.liege in BY_KEY else None)
+            e.active = False
+            self.toast(f"{bp.de} ({bp.en}) built. Walk up to it and press E.", 4)
+            g.sync_held()
+            self.build_sel = None
+            return
         n = g.queue_blueprint(bp, tx, g_row)
         self.toast(f"[Baustelle|construction site]: {bp.de} ({n} tiles)", 3)
         g.sync_held()
@@ -849,6 +875,9 @@ class UI:
             return
         ok = q["opts"][i] == q["en"]
         q["result"] = ok
+        if ok:
+            for _ in range(3):
+                lingua.get().heard(q["de"], q["en"])
         self.quiz_score = getattr(self, "quiz_score", 0) + (1 if ok else 0)
         if ok and self.quiz_score % 5 == 0:
             self.g.player.ehre += 1
@@ -966,14 +995,15 @@ class UI:
         # vitals
         panel(surf, (10, 10, 250, 92), 170)
         bar(surf, 20, 20, 150, 12, p.hp / p.max_hp, (190, 50, 44))
-        text(surf, f"[Leben] {int(p.hp)}", (176, 17), 12)
+        ltext(surf, f"Life {int(p.hp)}", (176, 16), 12)
         bar(surf, 20, 38, 150, 8, p.stamina / p.max_stamina, (220, 190, 70))
-        text(surf, "Ausdauer", (176, 34), 11, (200, 200, 190))
+        ltext(surf, "Stamina", (176, 33), 11, (200, 200, 190))
         bar(surf, 20, 52, 150, 8, p.hunger / 100, (150, 110, 60))
-        text(surf, "Hunger", (176, 48), 11, (200, 200, 190))
+        ltext(surf, "Hunger", (176, 47), 11, (200, 200, 190))
         if p.head_under or p.breath < 12:
             bar(surf, 20, 66, 150, 6, p.breath / 12, (120, 180, 240))
-            text(surf, "Atem (breath)", (176, 62), 11)
+            ltext(surf, "Breath", (176, 61), 11)
+        self.draw_body_doll(surf, 266, 10, p)
         r = rank_of(p.rank)
         text(surf, f"{r.de} ({r.en})", (20, 78), 13, GERMAN_COLOR)
         text(surf, f"{p.inv.money} Pf · Ehre {p.ehre}", (250, 78), 12, right=True)
@@ -982,10 +1012,12 @@ class UI:
         se = env.season_name()
         k, wde, wen = env.current()
         panel(surf, (SCREEN_W - 290, 10, 280, 74), 170)
-        text(surf, f"Tag {env.day + 1} · {env.clock_text()} · {se[0]} ({se[1]})", (SCREEN_W - 280, 16), 13)
-        text(surf, f"{wde} ({wen})", (SCREEN_W - 280, 34), 13, (200, 210, 230))
-        wt = env.wind_text()
-        text(surf, wt, (SCREEN_W - 280, 52), 12, (190, 200, 210))
+        ltext(surf, f"Day {env.day + 1} · {env.clock_text()} · {se[1]}", (SCREEN_W - 280, 16), 13)
+        ltext(surf, wen, (SCREEN_W - 280, 34), 13, (200, 210, 230))
+        sp = abs(env.wind)
+        wt = ("calm" if sp < 0.12 else "breeze" if sp < 0.45 else "wind" if sp < 0.8 else "gale") + \
+            (" → east" if env.wind > 0 else " ← west")
+        ltext(surf, wt, (SCREEN_W - 280, 52), 12, (190, 200, 210))
         tx = int(p.cx // TILE)
         s = g.world.settlement_at(tx, margin=20)
         kk = g.world.kingdom_at(tx)
@@ -1026,7 +1058,7 @@ class UI:
             extra = ""
             if d.weapon and WEAPONS[d.weapon].kind in ("bow",):
                 extra = f"  · {p.inv.count('arrow')} Pfeile" + (" (Brand)" if g.fire_arrows else "")
-            text(surf, f"{d.de} ({d.en}){extra}", (SCREEN_W // 2, y0 - 20), 14, GERMAN_COLOR, center=True)
+            ltext(surf, f"{d.en}{extra}", (SCREEN_W // 2, y0 - 20), 14, (236, 226, 200), center=True)
         # formations
         if p.haufen or p.followers:
             y = 110
@@ -1067,7 +1099,41 @@ class UI:
         if g.battle is not None:
             g.battle.draw_hud(surf)
         # tiny controls hint
-        text(surf, "H = Hilfe (help)", (SCREEN_W - 12, SCREEN_H - 18), 11, (150, 150, 140), right=True)
+        ltext(surf, "H = help", (SCREEN_W - 12, SCREEN_H - 18), 11, (150, 150, 140), right=True)
+
+    def draw_body_doll(self, surf, x, y, h):
+        """Little body diagram: each part coloured by its wound level, armour hardness as an outline."""
+        from ..combat import injury as INJ
+        panel(surf, (x, y, 44, 92), 170)
+        cols = [(110, 170, 90), (220, 190, 60), (230, 120, 50), (200, 40, 40)]
+        inj = h.injury
+        cx = x + 22
+
+        def c(part):
+            return cols[inj.get(part, 0)]
+
+        def edge(part):
+            hd = INJ.hardness(h, part)
+            return (210, 214, 224) if hd >= 5 else (170, 150, 110) if hd > 0 else (40, 34, 30)
+        pygame.draw.circle(surf, c("head"), (cx, y + 14), 6)
+        pygame.draw.circle(surf, edge("head"), (cx, y + 14), 6, 1)
+        r = pygame.Rect(cx - 7, y + 22, 14, 26)
+        pygame.draw.rect(surf, c("torso"), r)
+        pygame.draw.rect(surf, edge("torso"), r, 1)
+        for part, ax in (("arm_s", cx - 13), ("arm_w", cx + 9)):
+            ra = pygame.Rect(ax, y + 23, 4, 24)
+            pygame.draw.rect(surf, c(part), ra)
+            pygame.draw.rect(surf, edge(part), ra, 1)
+        for lx in (cx - 6, cx + 1):
+            rl = pygame.Rect(lx, y + 50, 5, 28)
+            pygame.draw.rect(surf, c("legs"), rl)
+            pygame.draw.rect(surf, edge("legs"), rl, 1)
+        if inj and not h.bandaged and any(v >= 1 for v in inj.values()):
+            if (pygame.time.get_ticks() // 400) % 2 == 0:
+                pygame.draw.polygon(surf, (200, 30, 30), [(x + 36, y + 80), (x + 39, y + 73), (x + 42, y + 80),
+                                                          (x + 39, y + 84)])
+        elif h.bandaged and inj:
+            text(surf, "+", (x + 36, y + 72), 14, (236, 230, 214))
 
     def draw_orders(self, surf):
         g = self.g
@@ -1131,7 +1197,7 @@ class UI:
         p = g.player
         m = self.market()
         r = panel(surf, (SCREEN_W // 2 - 460, 60, 920, SCREEN_H - 120), 235)
-        text(surf, f"Handel mit {self.npc.name} — {p.inv.money} Pfennig", (r.x + 16, r.y + 10), 20, GOLD, bold=True)
+        ltext(surf, f"Trade with {self.npc.name} — {p.inv.money} pennies", (r.x + 16, r.y + 10), 20, GOLD)
         text(surf, "Click: buy/sell one · Shift+Click: five · Esc: back. Prices follow supply & demand.",
              (r.x + 16, r.y + 38), 12, (190, 190, 180))
         self.trade_rects = []
@@ -1169,7 +1235,7 @@ class UI:
         g = self.g
         p = g.player
         r = panel(surf, (40, 40, SCREEN_W - 80, SCREEN_H - 80), 235)
-        text(surf, "Inventar & Handwerk (inventory & crafting)", (r.x + 16, r.y + 10), 20, GOLD, bold=True)
+        ltext(surf, "Inventory & crafting", (r.x + 16, r.y + 10), 20, GOLD)
         text(surf, "Click to pick up / swap · Right-click to equip/eat · I or Esc to close", (r.x + 16, r.y + 38), 12,
              (190, 190, 180))
         self.inv_rects = []
@@ -1242,14 +1308,14 @@ class UI:
         g = self.g
         p = g.player
         r = panel(surf, (SCREEN_W // 2 - 420, 70, 840, SCREEN_H - 140), 235)
-        text(surf, "Baupläne (blueprints)", (r.x + 16, r.y + 10), 20, GOLD, bold=True)
+        ltext(surf, "Blueprints", (r.x + 16, r.y + 10), 20, GOLD)
         text(surf, "Pick one, then place it on the ground. Builders raise it tile by tile. Single blocks: hold "
                    "them in the hotbar and click.", (r.x + 16, r.y + 38), 12, (190, 190, 180))
         self.build_rects = []
         mp = pygame.mouse.get_pos()
         for i, bp in enumerate(BLUEPRINTS):
-            y = r.y + 64 + i * 34
-            rect = pygame.Rect(r.x + 14, y, r.w - 28, 32)
+            y = r.y + 60 + i * 29
+            rect = pygame.Rect(r.x + 14, y, r.w - 28, 28)
             ok = p.inv.has(bp.cost)
             allowed = bp.rank <= p.rank
             if rect.collidepoint(mp):
@@ -1258,7 +1324,7 @@ class UI:
             text(surf, f"{bp.de} ({bp.en})", (rect.x + 6, y + 2), 15, GERMAN_COLOR if allowed else (130, 120, 100))
             cost = "  ".join(f"{ITEMS[k].de} {p.inv.count(k)}/{n}" for k, n in bp.cost.items())
             text(surf, cost, (rect.x + 260, y + 3), 12, col)
-            text(surf, bp.note + ("" if allowed else f"  [needs {rank_of(bp.rank).de}]"), (rect.x + 260, y + 17), 11,
+            text(surf, bp.note + ("" if allowed else f"  [needs {rank_of(bp.rank).de}]"), (rect.x + 260, y + 15), 11,
                  (160, 160, 150))
             self.build_rects.append((rect, bp))
 
@@ -1269,7 +1335,7 @@ class UI:
         if self.map_img is None:
             self.build_map()
         r = panel(surf, (20, 30, SCREEN_W - 40, SCREEN_H - 60), 240)
-        text(surf, "Karte der Welt (map of the world)", (r.x + 16, r.y + 10), 22, GOLD, bold=True)
+        ltext(surf, "Map of the world", (r.x + 16, r.y + 10), 22, GOLD)
         text(surf, "From the Abyss in the west to the Fire Sea in the east — about an hour's ride. Click a "
                    "settlement to travel by cart.", (r.x + 16, r.y + 40), 12, (190, 190, 180))
         mx0, my0 = r.x + 20, r.y + 120
@@ -1336,7 +1402,9 @@ class UI:
         p = self.g.player
         r = parchment(surf, (120, 40, SCREEN_W - 240, SCREEN_H - 80))
         text(surf, "Mein Wörterbuch", (r.x + 24, r.y + 14), 26, INK, bold=True, shadow=False)
-        text(surf, f"(my dictionary) — {len(p.dict.words)} Wörter. Q = Quiz, mouse wheel = scroll, N = close",
+        m, l, tot = lingua.get().progress()
+        text(surf, f"(my dictionary) — {len(p.dict.words)} Wörter · gemeistert (mastered) {m} · lerne (learning) {l}"
+                   f" · Wortschatz {tot}. Q = Quiz, wheel = scroll, N = close",
              (r.x + 24, r.y + 50), 13, (90, 70, 50), shadow=False)
         if self.quiz is not None:
             q = self.quiz
@@ -1361,7 +1429,9 @@ class UI:
             col, row = i // per_col, i % per_col
             x = r.x + 24 + col * ((r.w - 48) // 3)
             y = r.y + 80 + row * 22
-            text(surf, de, (x, y), 15, (130, 50, 20), bold=True, shadow=False)
+            star = "★ " if lingua.get().stage(de) == 2 else ""
+            text(surf, star + de, (x, y), 15, (130, 50, 20), bold=True, shadow=False)
+            de = star + de
             wde = font(15, True).size(de)[0]
             text(surf, f" — {en}" + (f"  ×{n}" if n > 1 else ""), (x + wde, y + 1), 13, INK, shadow=False)
 
@@ -1423,7 +1493,7 @@ class UI:
 
     def draw_help(self, surf):
         r = parchment(surf, (100, 40, SCREEN_W - 200, SCREEN_H - 80))
-        text(surf, "Hilfe (help)", (r.x + 24, r.y + 14), 26, INK, bold=True, shadow=False)
+        ltext(surf, "Help", (r.x + 24, r.y + 14), 26, INK, shadow=False, dark=True)
         lines = [
             ("A / D", "walk · Shift = run · S = crouch · run + S = slide · Space = jump · W = climb/swim up"),
             ("Mouse L / J", "attack — the move depends on your state: standing = 3-hit combo, running = charge,"),
@@ -1456,13 +1526,13 @@ class UI:
         s.fill((0, 0, 0, 150))
         surf.blit(s, (0, 0))
         text(surf, "Pause", (SCREEN_W // 2, 200), 44, GOLD, center=True, bold=True)
-        opts = ["1. Weiter (resume)", "2. Speichern (save)", "3. Hilfe (help)", "4. Hauptmenü (main menu)"]
+        opts = ["1. Resume", "2. Save", "3. Help", "4. Main menu"]
         self.pause_rects = []
         for i, o in enumerate(opts):
             rect = pygame.Rect(SCREEN_W // 2 - 160, 280 + i * 50, 320, 40)
             hov = rect.collidepoint(pygame.mouse.get_pos())
             panel(surf, rect, 220 if hov else 160)
-            text(surf, o, rect.center, 18, GOLD if hov else (230, 225, 210), center=True)
+            ltext(surf, o, (rect.centerx, rect.y + 9), 18, GOLD if hov else (230, 225, 210), center=True)
             surf.blit(pygame.Surface((0, 0)), (0, 0))
             self.pause_rects.append(rect)
 

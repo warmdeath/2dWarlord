@@ -49,21 +49,54 @@ def roof(w, x0, x1, top, mat, overhang=1):
     return y + 1
 
 
-def house(w, x0, g, width=9, height=4, style="peasant", door_side=1, rng=None, kind="house"):
+WALLS = {"peasant": T.FACHWERK.id, "burgher": T.FACHWERK.id, "stone": T.BRICK.id, "wood": T.PLANKS.id,
+         "snow": T.PLANKS.id, "ash": T.BRICK.id, "brick": T.BRICK.id, "tower": T.BRICK.id, "log": T.LOGWALL.id,
+         "longhouse": T.PLANKS.id, "basalt": T.BASALTBRICK.id, "chained": T.FACHWERK.id}
+ROOFS = {"peasant": T.THATCH.id, "burgher": T.ROOFTILE.id, "stone": T.SLATE.id, "wood": T.THATCH.id,
+         "snow": T.SLATE.id, "ash": T.SLATE.id, "brick": T.ROOFTILE.id, "tower": T.SLATE.id, "log": T.THATCH.id,
+         "longhouse": T.TURF.id, "basalt": T.BASALTBRICK.id, "chained": T.THATCH.id}
+BGS = {"peasant": T.BG_FACHWERK, "burgher": T.BG_FACHWERK, "stone": T.BG_BRICK, "wood": T.BG_PLANKS,
+       "snow": T.BG_PLANKS, "ash": T.BG_BRICK, "brick": T.BG_BRICK, "tower": T.BG_BRICK, "log": T.BG_PLANKS,
+       "longhouse": T.BG_PLANKS, "basalt": T.BG_ASH, "chained": T.BG_FACHWERK}
+
+
+def roof_stepped(w, x0, x1, top, mat):
+    """Treppengiebel — the stepped brick gable of the Hanseatic towns."""
+    a, b, y = x0, x1, top
+    while a <= b:
+        for _ in range(2):
+            for x in range(a, b + 1):
+                _put(w, x, y, mat)
+            y -= 1
+        a += 1
+        b -= 1
+    # little finials on the steps
+    return y
+
+
+def roof_low(w, x0, x1, top, mat):
+    """A long, low turf roof: two tiles in per row."""
+    a, b, y = x0 - 1, x1 + 1, top
+    while a <= b:
+        for x in range(a, b + 1):
+            _put(w, x, y, mat)
+        a += 2
+        b -= 2
+        y -= 1
+    return y
+
+
+def house(w, x0, g, width=9, height=4, style="peasant", door_side=1, rng=None, kind="house", floors=None):
     rng = rng or random
     x1 = x0 + width - 1
-    wall = {"peasant": T.FACHWERK.id, "burgher": T.FACHWERK.id, "stone": T.BRICK.id,
-            "wood": T.PLANKS.id, "snow": T.PLANKS.id, "ash": T.BRICK.id}[style]
-    mat = {"peasant": T.THATCH.id, "burgher": T.ROOFTILE.id, "stone": T.SLATE.id, "wood": T.THATCH.id,
-           "snow": T.SLATE.id, "ash": T.SLATE.id}[style]
-    bgw = {"peasant": T.BG_FACHWERK, "burgher": T.BG_FACHWERK, "stone": T.BG_BRICK, "wood": T.BG_PLANKS,
-           "snow": T.BG_PLANKS, "ash": T.BG_BRICK}[style]
-    floors = 2 if style == "burgher" and width >= 9 else 1
+    wall, mat, bgw = WALLS[style], ROOFS[style], BGS[style]
+    if floors is None:
+        floors = 2 if style == "burgher" and width >= 9 else 3 if style == "brick" and width >= 8 else 1
     total_h = height * floors + (floors - 1)
     clear_box(w, x0 - 2, x1 + 2, g - total_h - width // 2 - 4, g - 1)
     foundation(w, x0 - 1, x1 + 1, g)
     for x in range(x0, x1 + 1):
-        _put(w, x, g, T.PLANKS.id if style != "stone" else T.COBBLE.id)
+        _put(w, x, g, T.PLANKS.id if style not in ("stone", "tower", "brick", "basalt") else T.COBBLE.id)
     top = g - total_h - 1
     for y in range(top + 1, g):
         _put(w, x0, y, wall)
@@ -76,8 +109,10 @@ def house(w, x0, g, width=9, height=4, style="peasant", door_side=1, rng=None, k
             _bg(w, x, y, T.BG_WINDOW)
     # upper floors as walkable platforms with a ladder
     ladder_x = x0 + 1 if door_side == 1 else x1 - 1
+    floor_rows = []
     for f in range(1, floors):
         fy = g - f * (height + 1)
+        floor_rows.append(fy)
         for x in range(x0 + 1, x1):
             _put(w, x, fy, T.PLATFORM.id)
         for y in range(fy, g):
@@ -86,8 +121,44 @@ def house(w, x0, g, width=9, height=4, style="peasant", door_side=1, rng=None, k
             for x in range(x0 + 2, x1 - 1, 3):
                 _bg(w, x, y, T.BG_WINDOW)
     for x in range(x0, x1 + 1):
-        _put(w, x, top, T.PLANKS.id)
-    roof(w, x0, x1, top - 1, mat)
+        _put(w, x, top, T.PLANKS.id if style != "basalt" else T.BASALTBRICK.id)
+    if style == "brick":
+        roof_top = roof_stepped(w, x0, x1, top - 1, mat)
+    elif style == "longhouse":
+        roof_top = roof_low(w, x0, x1, top - 1, mat)
+    elif style == "basalt":
+        for x in range(x0 - 1, x1 + 2):
+            _put(w, x, top - 1, mat)
+        for y in range(top - 4, top - 1):       # a squat chimney
+            _put(w, x0 + 2, y, T.BASALTBRICK.id)
+        roof_top = top - 4
+        # earth heaped against the walls against the heat
+        for k, hgt in ((1, 3), (2, 2), (3, 1)):
+            for y in range(g - hgt, g):
+                for xx in (x0 - k, x1 + k):
+                    if 0 <= xx < w.w and w.fg[xx, y] == 0:
+                        w.fg[xx, y] = T.ASH.id
+    else:
+        roof(w, x0, x1, top - 1, mat)
+        roof_top = top - 1 - (width + 2) // 2
+    if style == "chained":
+        # Kettenhäuser of the Randmark: chained to iron stakes so the crumbling edge cannot take them
+        for k in range(1, 5):
+            xx, yy = x1 + k, top + k
+            if 0 <= xx < w.w and yy < g and w.fg[xx, yy] == 0:
+                w.fg[xx, yy] = T.CHAIN.id
+        sx = x1 + 5
+        if 0 <= sx < w.w and w.fg[sx, g - 1] == 0:
+            w.fg[sx, g - 1] = T.PALISADE.id
+    if not hasattr(w, "smokers"):
+        w.smokers = []
+    w.smokers.append((x0 + (2 if style == "basalt" else width // 2), roof_top))
+    if style == "tower" and floors > 1:
+        # side doors on the upper floors lead onto the bridges between tower houses
+        fy = floor_rows[0]
+        for y in range(fy - 3, fy):
+            _put(w, x0, y, T.DOOR.id)
+            _put(w, x1, y, T.DOOR.id)
     # doors (3 tall) on both sides: in a side view the street runs *through* the houses
     dx = x1 if door_side == 1 else x0
     for y in range(g - 3, g):
@@ -112,7 +183,49 @@ def house(w, x0, g, width=9, height=4, style="peasant", door_side=1, rng=None, k
         _put(w, x0 + width // 2, fy - 1, T.BED.id)
         beds.append(x0 + width // 2)
     return dict(kind=kind, x0=x0, x1=x1, g=g, door=dx, beds=beds, work=x0 + width // 2, style=style,
-                top=top - width // 2 - 1)
+                top=top - width // 2 - 1, floors=floor_rows)
+
+
+def walkway(w, x0, x1, g):
+    """A raised plank walk over a field, with steps at both ends — feet stay off the crops."""
+    deck = g - 4
+    for x in range(x0 - 1, x1 + 2):
+        _put(w, x, deck, T.PLATFORM.id)
+    for k, (xa, xb) in enumerate(((x0 - 4, x1 + 4), (x0 - 3, x1 + 3), (x0 - 2, x1 + 2))):
+        for xx in (xa, xb):
+            if 0 <= xx < w.w and w.fg[xx, g - 1 - k] == 0:
+                for yy in range(g - 1 - k, g):
+                    if w.fg[xx, yy] == 0:
+                        w.fg[xx, yy] = T.PLANKS.id
+    for x in list(range(x0 - 1, x1 + 2, 5)) + [x1 + 1]:
+        for y in range(deck + 1, g - 1):
+            if 0 <= x < w.w and w.fg[x, y] == 0:
+                w.fg[x, y] = T.LOG.id
+
+
+def bridge(w, x0, x1, deck_row, rng, stone=True):
+    """A stone bridge on piers (or a timber trestle) across water or a ravine."""
+    for x in range(x0, x1 + 1):
+        if 0 <= x < w.w:
+            w.fg[x, deck_row] = T.COBBLE.id if stone else T.PLANKS.id
+            w.liq[x, deck_row] = 0
+            for y in range(deck_row - 3, deck_row):
+                if w.fg[x, y] in (T.TALLGRASS.id, T.FLOWER.id, T.LEAVES.id):
+                    w.fg[x, y] = 0
+    step = 6 if stone else 5
+    for x in range(x0 + step // 2, x1, step):
+        y = deck_row + 1
+        while y < w.h - 1 and not T.SOLID[w.fg[x, y]]:
+            w.fg[x, y] = T.BRICK.id if stone else T.LOG.id
+            w.liq[x, y] = 0
+            if stone and x + 1 <= x1:
+                w.fg[x + 1, y] = T.BRICK.id
+                w.liq[x + 1, y] = 0
+            y += 1
+    # railing posts
+    for x in range(x0, x1 + 1, 3):
+        if 0 <= x < w.w and w.fg[x, deck_row - 1] == 0:
+            w.fg[x, deck_row - 1] = T.TORCH.id if (x - x0) % 12 == 0 and stone else 0
 
 
 def church(w, x0, g, width=13, rng=None):
@@ -187,13 +300,14 @@ def well(w, x, g):
     return dict(kind="well", x0=x, x1=x, g=g, door=x, beds=[], work=x, style="stone", top=g - 3)
 
 
-def field(w, x0, x1, g, rng):
+def field(w, x0, x1, g, rng, crop="wheat"):
     for x in range(x0, x1 + 1):
         clear_box(w, x, x, g - 3, g - 1)
         _put(w, x, g, T.FARMLAND.id)
         if rng.random() < 0.9:
-            _put(w, x, g - 1, rng.choice(T.CROP_STAGES))
-    return dict(kind="field", x0=x0, x1=x1, g=g, door=x0, beds=[], work=(x0 + x1) // 2, style="field", top=g - 2)
+            _put(w, x, g - 1, rng.choice(T.CROPS[crop]))
+    return dict(kind="field", x0=x0, x1=x1, g=g, door=x0, beds=[], work=(x0 + x1) // 2, style="field", top=g - 2,
+                crop=crop)
 
 
 def stall(w, x0, g, rng):
@@ -313,7 +427,8 @@ def castle(w, x0, g, rng, size="castle"):
     recs = []
     inner = 46 if size == "castle" else 64
     x = x0
-    recs.append(tower(w, x, g, width=6, height=14))
+    open_top = None if size == "castle" else T.SLATE.id     # outer towers of a fortress are open fighting tops
+    recs.append(tower(w, x, g, width=6, height=14, roofmat=open_top))
     x += 6
     recs.append(wall_tower(w, x, g, height=9, thick=2, gate=True))
     x += 2
@@ -339,12 +454,63 @@ def castle(w, x0, g, rng, size="castle"):
         if w.fg[xx, g - 10] == 0:
             pass
     recs.append(wall_tower(w, end, g, height=9, thick=2, gate=True))
-    recs.append(tower(w, end + 2, g, width=6, height=14))
+    recs.append(tower(w, end + 2, g, width=6, height=14, roofmat=open_top))
     # courtyard paving
     for xx in range(x0, end + 8):
         if w.fg[xx, g] not in (T.BRICK.id,):
             _put(w, xx, g, T.COBBLE.id)
+    if size == "castle":
+        fortify(w, x0, end, g, rng)
     return recs, end + 8
+
+
+def fortify(w, x0, end, g, rng):
+    """Moats with drawbridges, portcullises behind them, machicolations for pitch, and a winch."""
+    if not hasattr(w, "gatehouses"):
+        w.gatehouses = []
+    for side in (-1, 1):
+        if side < 0:
+            mx0, mx1 = x0 - 7, x0 - 2           # moat columns
+            up_x = x0 - 1                        # where the raised bridge stands
+            port_x = x0 + 6                      # outer column of the gate wall
+            winch = (x0 + 8, g - 1)
+            mach_x = x0 - 1
+        else:
+            mx0, mx1 = end + 9, end + 14
+            up_x = end + 8
+            port_x = end + 1
+            winch = (end - 1, g - 1)
+            mach_x = end + 8
+        clear_box(w, mx0 - 1, mx1 + 1, g - 14, g - 1)
+        for x in range(mx0, mx1 + 1):
+            for y in range(g, g + 5):
+                if 0 <= x < w.w:
+                    w.fg[x, y] = 0
+                    w.bg[x, y] = T.BG_DIRT
+            for y in range(g + 1, g + 5):
+                w.liq[x, y] = 8
+                w.lava[x, y] = False
+            _put(w, x, g + 5, T.STONE.id)
+            _put(w, x, g + 6, T.STONE.id)
+        for x in (mx0 - 1, mx1 + 1):          # stone-lined banks
+            for y in range(g, g + 6):
+                if 0 <= x < w.w and not T.SOLID[w.fg[x, y]]:
+                    w.fg[x, y] = T.STONE.id
+        bridge = [(x, g) for x in range(mx0, mx1 + 1)]
+        for x, y in bridge:
+            _put(w, x, y, T.BRIDGE.id)
+        bridge_up = [(up_x, y) for y in range(g - (mx1 - mx0 + 1), g)]
+        portcullis = [(port_x, y) for y in range(g - 3, g)]
+        for x, y in portcullis:
+            _put(w, x, y, T.PORTCULLIS_UP.id)
+        # machicolation: an overhanging slot on the tower top above the entrance
+        top = g - 14
+        _put(w, mach_x, top, T.PECHNASE.id)
+        if 0 <= winch[0] < w.w and w.fg[winch] == 0:
+            _put(w, winch[0], winch[1], T.WINCH.id)
+        w.gatehouses.append({"bridge": bridge, "bridge_up": bridge_up, "portcullis": portcullis, "winch": winch,
+                             "pechnase": (mach_x, top), "side": side, "closed": False, "x": (mx0 + mx1) // 2,
+                             "g": g})
 
 
 def dock(w, shore_x, g_water, length, direction, rng):

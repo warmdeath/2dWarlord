@@ -16,6 +16,7 @@ class Blueprint:
     build: Callable
     rank: int = 0
     note: str = ""
+    engine: str = None
 
 
 def _hut(w, x, g, rng):
@@ -99,6 +100,14 @@ BLUEPRINTS = [
               "A village needs its bell."),
     Blueprint("hall", "Rittersaal", "knight's hall", 17, {"brick": 90, "slate": 40, "planks": 30, "cloth": 6}, _hall,
               4, "Where a lord holds court."),
+    Blueprint("ramm", "Rammbock", "battering ram", 4, {"wood": 40, "leather": 6, "iron_ingot": 4}, None, 3,
+              "A ram under a hide roof ('Katze'). E to send it forward.", engine="ramm"),
+    Blueprint("blide", "Blide", "trebuchet", 5, {"wood": 80, "rope": 12, "stone": 40}, None, 4,
+              "Hurls stones at walls. E: fire at will / cease fire.", engine="blide"),
+    Blueprint("turm", "Belagerungsturm", "siege tower", 4, {"wood": 120, "leather": 10}, None, 4,
+              "Rolls to the wall; a Haufen following it crosses onto the battlements.", engine="turm"),
+    Blueprint("buechse", "Donnerbüchse", "powder gun", 3, {"iron_ingot": 10, "pulver": 4, "wood": 10}, None, 5,
+              "Experimental and dangerous: it may burst. Needs Schwarzpulver.", engine="buechse"),
     Blueprint("castle", "Burg", "castle", 60, {"brick": 500, "slate": 120, "planks": 150, "iron_ingot": 20}, _castle,
               5, "Curtain walls, keep, towers, hall."),
 ]

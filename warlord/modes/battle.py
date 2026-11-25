@@ -37,12 +37,27 @@ SCENARIOS = {
                          "except a [Igel|hedgehog] of braced pikes. Keep your archers behind the pikes,",
                          "and send your own knights against their archers."]),
     "siege": dict(de="Die Belagerung", en="The Siege", biome="forest", enemy="bandit",
-                  mine=[("schild", 30), ("speer", 28), ("armbrust", 20), ("bauern", 30)],
-                  theirs=[("bogen", 18), ("schild", 22), ("raeuber", 30)],
-                  intro=["The [Raubritter|robber knight] Kuno sits in his [Burg|castle] at Schwarzfels.",
-                         "Order [Angriff|charge] and your men hack down the [Tor|gate] — or dig under the wall "
-                         "until it collapses.",
-                         "Raise [Schilde|shields] against the archers on the battlements."]),
+                  mine=[("schild", 26), ("leiter", 22), ("mineure", 12), ("armbrust", 20)],
+                  engines=[("ramm", 548), ("turm", 530), ("blide", 505)],
+                  intro=["The [Raubritter|robber knight] Kuno sits behind a [Graben|moat], a [Zugbrücke|drawbridge] "
+                         "and an iron [Fallgatter|portcullis].",
+                         "Your [Blide|trebuchet] batters the walls. Your [Rammbock|ram] needs the moat filled first —",
+                         "men stuck below a bank shovel a [Rampe|ramp]. [Leiterträger|ladder men] climb, the "
+                         "[Belagerungsturm|siege tower] brings your shields onto the wall,",
+                         "and the [Mineure|sappers] dig under it and burn the props.",
+                         "C = orders (Vorwärts!) · E next to an engine starts or stops it."]),
+    "verteidigung": dict(de="Die Verteidigung", en="The Defence", biome="hills", enemy="glutmark",
+                         mine=[("bogen", 14), ("armbrust", 12), ("schild", 24), ("hellebarde", 16)],
+                         theirs=[("leiter", 26), ("schild", 30), ("bauern", 40), ("mineure", 14), ("armbrust", 20)],
+                         engines=[("ramm", 470), ("turm", 440), ("blide", 500), ("buechse", 548), ("buechse", 540)],
+                         intro=["Markgraf Otto der Rote brings fire against your [Burg|castle] — and something new:",
+                                "two [Donnerbüchsen|thunder-guns] that spit iron with a roar. They may burst. Pray "
+                                "they do.",
+                                "Archers on the towers, [Hellebardiere|halberdiers] at the gate. Push the "
+                                "[Leitern|ladders] off the wall,",
+                                "pour [Pech|pitch] from the [Pechnase|machicolation] (E on the tower top) on whoever "
+                                "reaches the gate,",
+                                "and burn the siege tower with fire arrows (V)."]),
 }
 
 
@@ -93,15 +108,20 @@ def make_arena(kind, seed=7):
         g = int(surf[W // 2])
         S.wall_tower(w, W // 2, g, height=10, thick=3, gate=True)
         S.tower(w, W // 2 - 7, g, width=6, height=13)
-    if kind == "siege":
+    if kind in ("siege", "verteidigung"):
         g = int(np.median(surf[600:760]))
-        surf[590:770] = g
+        surf[586:774] = g
         w.surface[:] = surf
-        for x in range(590, 770):
+        for x in range(586, 774):
             w.fg[x, :g] = 0
             w.fg[x, g:g + 6] = T.DIRT.id
             w.fg[x, g] = T.GRASS.id
         S.castle(w, 600, g, rng, size="castle")
+        w.castle_g = g
+        for gh in w.gatehouses:
+            gh["owner"] = "player" if kind == "verteidigung" else sc["enemy"]
+            gh["auto"] = True
+            gh["pitch"] = 8
     return w
 
 
@@ -132,14 +152,7 @@ class Battle:
                 p.haufen.append(hf)
                 x -= hf.width() + 30
             ex = (w.w // 2 + 60) * TILE
-        elif self.kind == "siege":
-            x = 420 * TILE
-            for unit, n in sc["mine"]:
-                hf = Haufen(s, "player", unit, n, x, 1, mine_colors, leader=p)
-                hf.order = "halt"
-                s.formations.append(hf)
-                p.haufen.append(hf)
-                x -= hf.width() + 30
+        elif self.kind in ("siege", "verteidigung"):
             ex = None
         else:
             x = 380 * TILE
@@ -150,14 +163,8 @@ class Battle:
                 p.haufen.append(hf)
                 x -= hf.width() + 30
             ex = 600 * TILE
-        if self.kind == "siege":
-            # archers on the walls, men-at-arms in the courtyard, rabble outside the gate
-            placements = [("bogen", 18, 612 * TILE), ("schild", 22, 640 * TILE), ("raeuber", 30, 560 * TILE)]
-            for unit, n, px in placements:
-                hf = Haufen(s, sc["enemy"], unit, n, px, -1, enemy_colors)
-                hf.order = "halt"
-                hf.no_advance = unit != "raeuber"
-                s.formations.append(hf)
+        if self.kind in ("siege", "verteidigung"):
+            self.setup_siege(mine_colors, enemy_colors)
         else:
             order = sorted(sc["theirs"], key=lambda u: (u[0] in ("bogen", "armbrust"),))
             for unit, n in order:
@@ -173,6 +180,82 @@ class Battle:
                                                "Enemy waits until you advance — or until the horn sounds."],
                        subtitle=f"({sc['en']})", on_close=self.horn)
 
+    def setup_siege(self, mine_colors, enemy_colors):
+        """The castle at tiles 600-662: west tower 600-605, gate wall 606-607, keep 611-619, hall, east wall."""
+        from ..entities.humanoid import Humanoid
+        from ..society.names import make_look
+        s = self.s
+        w = s.world
+        sc = self.sc
+        p = s.player
+        g = w.castle_g
+        defenders_side = "player" if self.kind == "verteidigung" else sc["enemy"]
+        dcol = mine_colors if defenders_side == "player" else enemy_colors
+        acol = enemy_colors if defenders_side == "player" else mine_colors
+        attackers_side = sc["enemy"] if defenders_side == "player" else "player"
+        top = g - 14
+
+        def garrison(unit, n, x, row, no_adv=True, side=defenders_side, col=dcol, facing=-1):
+            hf = Haufen(s, side, unit, n, x * TILE + 6, facing, col, leader=p if side == "player" else None)
+            hf.base_row = row
+            hf.order = "halt"
+            hf.no_advance = no_adv
+            s.formations.append(hf)
+            if side == "player":
+                p.haufen.append(hf)
+            return hf
+
+        if self.kind == "verteidigung":
+            garrison("bogen", sc["mine"][0][1], 600, top)
+            garrison("armbrust", sc["mine"][1][1], 611, g - 22)
+            garrison("hellebarde", sc["mine"][3][1], 609, g)
+            garrison("schild", sc["mine"][2][1], 626, g)
+        else:
+            garrison("bogen", 12, 600, top)
+            garrison("schild", 20, 622, g)
+            garrison("raeuber", 26, 584, g, no_adv=False)
+        # wall guards: individuals who man the battlements and shove ladders off
+        for i, tx in enumerate((601, 603, 606, 607, 612, 615)):
+            row = w.ground_at(tx, max(0, top - 4))
+            look = make_look(s.rng, 1, "guard", kingdom_colors=dcol, soldier=True)
+            h = Humanoid(tx * TILE, row * TILE - 43, look, defenders_side, "Burgwache")
+            h.equip(weapon=s.rng.choice(["speer", "schwert", "axt"]), shield="holzschild", armor="gambeson",
+                    helmet="eisenhut")
+            h.leash = (tx * TILE + 8, 110)
+            h.brave = True
+            h.keep = True
+            h.home_brain = "combat"
+            s.add_humanoid(h, "combat")
+        # the besiegers
+        ax = 520 if self.kind == "siege" else 500
+        army = sc["mine"] if self.kind == "siege" else sc["theirs"]
+        tower_haufen = None
+        x = ax * TILE
+        for unit, n in army:
+            hf = Haufen(s, attackers_side, unit, n, x, 1, acol, leader=p if attackers_side == "player" else None)
+            hf.order = "halt"
+            s.formations.append(hf)
+            if attackers_side == "player":
+                p.haufen.append(hf)
+            if unit == "schild":
+                tower_haufen = hf
+            x -= hf.width() + 30
+        for key, ex in sc["engines"]:
+            e = s.spawn_engine(key, ex * TILE, attackers_side, 1, acol)
+            e.active = False
+            if key == "turm" and tower_haufen is not None:
+                e.carry = tower_haufen
+                tower_haufen.leader = e
+                tower_haufen.order = "folgt"
+        if self.kind == "siege":
+            p.x = (ax - 70) * TILE
+        else:
+            p.x = 630 * TILE
+        p.y = (w.ground_at(int(p.x // TILE), max(0, g - 3))) * TILE - p.h - 1
+        p.fall_peak = p.y
+        s.camera.snap(p.cx, p.cy)
+        p.inv.add("pech", 4)
+
     def horn(self):
         self.s.sfx("horn")
         self.started = True
@@ -185,6 +268,13 @@ class Battle:
             return
         self.t += dt
         s = self.s
+        if self.t > 4 and not getattr(self, "engines_go", False):
+            self.engines_go = True
+            for e in s.engines:
+                e.active = True
+            for hf in s.formations:
+                if self.kind == "verteidigung" and hf.side != "player" and hf.order == "halt":
+                    hf.order = "vorwaerts"
         # after a short pause the enemy begins its advance
         if self.t > 6:
             for hf in s.formations:
@@ -226,13 +316,13 @@ class Battle:
 def build_battle(app, kind):
     from .session import Session
     w = make_arena(kind)
-    spawn = {"pass": w.w // 2 - 30, "siege": 430}.get(kind, 395)
+    spawn = {"pass": w.w // 2 - 30, "siege": 450, "verteidigung": 630}.get(kind, 395)
     s = Session(app, w, mode="battle", seed=7, spawn=spawn, player_rank=6)
     p = s.player
     p.look["tabard"] = ((40, 70, 140), (236, 232, 222))
     p.look["trim"] = (214, 178, 74)
     for k, n in (("schwert", 1), ("bogen", 1), ("arrow", 40), ("spitzhacke", 1), ("bread", 5), ("armbrust", 1),
-                 ("bolt", 20)):
+                 ("bolt", 20), ("verband", 5)):
         p.inv.add(k, n)
     p.equip(weapon="schwert", shield="dreieckschild", armor="kettenhemd", helmet="topfhelm")
     p.max_hp = p.hp = 160

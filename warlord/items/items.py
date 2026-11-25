@@ -68,6 +68,17 @@ _i("shell", "Muschel", "shell", "material", 2, color=(230, 200, 190), icon="lump
 _i("herb", "Kräuter", "herbs", "material", 3, color=(120, 180, 90), icon="lump")
 # food
 _i("wheat", "Weizen", "wheat", "material", 2, color=(222, 190, 84), icon="sheaf")
+_i("rye", "Roggen", "rye", "material", 2, color=(196, 170, 110), icon="sheaf")
+_i("oats", "Hafer", "oats", "material", 2, color=(220, 210, 150), icon="sheaf")
+_i("flax", "Flachs", "flax", "material", 3, color=(190, 170, 110), icon="sheaf")
+_i("turnip", "Rübe", "turnip", "food", 2, food=10, color=(226, 214, 190), icon="berry")
+_i("seeds_rye", "Roggensaat", "rye seed", "place", 1, place=T.RYE1.id, color=(170, 150, 100), icon="seeds")
+_i("seeds_oat", "Hafersaat", "oat seed", "place", 1, place=T.OAT1.id, color=(200, 190, 140), icon="seeds")
+_i("seeds_flax", "Leinsamen", "flax seed", "place", 1, place=T.FLAX1.id, color=(150, 120, 80), icon="seeds")
+_i("seeds_turnip", "Rübensamen", "turnip seed", "place", 1, place=T.TURNIP1.id, color=(160, 120, 90),
+   icon="seeds")
+_i("mist", "Mist", "manure", "misc", 1, color=(90, 70, 40), icon="lump")
+_i("pflug", "Pflug", "plough", "misc", 40, stack=1, color=(120, 90, 60), icon="hammer")
 _i("flour", "Mehl", "flour", "material", 3, color=(240, 236, 226), icon="sack")
 _i("bread", "Brot", "bread", "food", 4, food=30, color=(200, 150, 80), icon="bread")
 _i("berries", "Beeren", "berries", "food", 1, food=8, color=(170, 30, 60), icon="berry")
@@ -87,13 +98,20 @@ for key, tile, val in (("workbench", T.WORKBENCH, 8), ("anvil", T.ANVIL, 40), ("
 _i("arrow", "Pfeil", "arrow", "ammo", 1, color=(200, 190, 170), icon="arrow")
 _i("bolt", "Bolzen", "crossbow bolt", "ammo", 2, color=(170, 170, 176), icon="arrow")
 _i("fire_arrow", "Brandpfeil", "fire arrow", "ammo", 3, color=(255, 140, 40), icon="arrow")
+_i("pech", "Pech", "pitch", "material", 4, color=(30, 26, 24), icon="lump")
+_i("schwefel", "Schwefel", "sulphur", "material", 8, color=(230, 214, 60), icon="lump")
+_i("salpeter", "Salpeter", "saltpetre", "material", 8, color=(236, 232, 220), icon="lump")
+_i("pulver", "Schwarzpulver", "black powder", "material", 30, color=(40, 40, 40), icon="sack")
+_i("kugel", "Steinkugel", "stone ball", "ammo", 4, color=(150, 146, 136), icon="lump")
+_i("stuetze", "Stütze", "mine prop", "place", 2, place=T.PROP.id, color=(124, 86, 48), icon="block")
+_i("verband", "Verband", "bandage", "heal", 3, color=(236, 230, 214), icon="lump")
 _i("chronik", "Chronik", "the Frostholm chronicle", "misc", 0, stack=1, color=(120, 40, 40), icon="block")
 # boats and mounts (deeds)
 _i("boat", "Boot", "boat", "mount", 120, stack=1, color=(140, 100, 60), icon="boat")
 _i("horse", "Pferd", "horse", "mount", 90, stack=1, color=(120, 80, 50), icon="horse")
 
 # weapons / tools
-VALUES = {"fists": 0, "knueppel": 4, "schwert": 60, "langschwert": 110, "dolch": 20, "axt": 30, "streitkolben": 55,
+VALUES = {"hacke": 6, "fists": 0, "knueppel": 4, "schwert": 60, "langschwert": 110, "dolch": 20, "axt": 30, "streitkolben": 55,
           "flegel": 10, "mistgabel": 8, "speer": 22, "spiess": 35, "hellebarde": 70, "lanze": 50, "bogen": 30,
           "armbrust": 80, "spitzhacke": 18, "hammer": 10, "sichel": 8, "fackel": 2}
 for wk, wd in WEAPONS.items():

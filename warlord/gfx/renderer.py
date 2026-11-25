@@ -110,6 +110,9 @@ class Renderer:
             if not s[lx + 1, ly + 1] or T.TILES[fg[lx, ly]].deco:
                 b = int(bgw[lx, ly])
                 blit(tileart.bg_surface(b, int(lx * 7 + ly * 3 + x0) % 2), (lx * TILE, ly * TILE))
+        winter = tileart.SEASON == 3
+        snowy_col = [((winter and w.biome_at(x0 + i) not in ("volcanic", "ashland", "lavasea", "ocean")) or
+                      w.biome_at(x0 + i) == "snow") for i in range(CHUNK)]
         nz = np.argwhere(fg > 0)
         for lx, ly in nz:
             tid = int(fg[lx, ly])
@@ -125,8 +128,11 @@ class Renderer:
                 continue
             m = int(mask[lx, ly]) if t.natural else 0
             blit(tileart.tile_surface(tid, var, m), (px, py))
-            if t.style == "grass" and up[lx, ly]:
-                blit(tileart.grass_cap(tid, var), (px, py - 3))
+            if up[lx, ly] and t.natural:
+                if snowy_col[lx]:
+                    blit(tileart.snow_cap(var), (px, py - 3))
+                elif t.style == "grass":
+                    blit(tileart.grass_cap(tid, var), (px, py - 3))
         if len(nz) and cy * CHUNK > 0:
             pass
         return surf
@@ -372,6 +378,12 @@ class Renderer:
             pygame.draw.rect(surf, c, (x - w / 2 + k * 8, y - 30, 4, 4))
 
     # ------------------------------------------------------------------ world layers
+    def set_season(self, season):
+        if season != tileart.SEASON:
+            tileart.set_season(season)
+            self.terrain.clear()
+            self.liquid.clear()
+
     def draw_terrain(self, surf, cam):
         SW, SH = surf.get_size()
         self.invalidate()

@@ -102,13 +102,23 @@ class PlayerController:
             if self.place_cd <= 0 and g.try_place(p, held, tx, ty):
                 self.place_cd = 0.12
             return
+        if hd is not None and hd.cat == "heal" and clicked and self.eat_cd <= 0:
+            g.bandage(p)
+            self.eat_cd = 0.6
+            return
         if hd is not None and hd.cat == "food" and clicked and self.eat_cd <= 0:
             g.eat(p, held)
             self.eat_cd = 0.4
             return
+        if clicked and in_reach and g.world.inside(tx, ty):
+            if p.weapon_key == "hacke" and g.till(tx, ty):
+                return
+            if held == "mist" and g.manure(tx, ty):
+                return
         wd = p.weapon_def
-        tool_like = wd.kind == "tool" or (wd.key == "axt" and in_reach and g.world.inside(tx, ty) and
-                                          g.world.fg[tx, ty] in (T.LOG.id, T.LEAVES.id, T.PINE.id))
+        tool_like = (wd.kind == "tool" and wd.key != "hacke") or (
+            wd.key == "axt" and in_reach and g.world.inside(tx, ty) and
+            g.world.fg[tx, ty] in (T.LOG.id, T.LEAVES.id, T.PINE.id, T.BIRCH.id))
         if lmb and tool_like and in_reach and g.world.inside(tx, ty) and g.world.fg[tx, ty] != 0:
             self.mine(dt, tx, ty)
             return

@@ -22,6 +22,12 @@ STATION_TILES = {
 
 RECIPES = [
     Recipe("planks", 4, {"wood": 1}),
+    Recipe("verband", 3, {"cloth": 1}),
+    Recipe("stuetze", 3, {"wood": 2}, "workbench"),
+    Recipe("pech", 2, {"wood": 3, "coal": 1}, "oven"),
+    Recipe("kugel", 2, {"stone": 6}, "workbench"),
+    Recipe("pulver", 1, {"salpeter": 3, "schwefel": 1, "coal": 1}, "workbench"),
+    Recipe("verband", 1, {"wool": 1, "herb": 1}),
     Recipe("workbench", 1, {"planks": 8}),
     Recipe("torch", 4, {"wood": 1, "coal": 1}),
     Recipe("torch", 2, {"wood": 2}),
@@ -54,6 +60,10 @@ RECIPES = [
     Recipe("iron_ingot", 1, {"iron_ore": 2, "coal": 1}, "oven"),
     Recipe("silver_coin", 30, {"silver_ore": 2, "coal": 1}, "oven"),
     Recipe("flour", 1, {"wheat": 3}, "workbench"),
+    Recipe("flour", 1, {"rye": 3}, "workbench"),
+    Recipe("cloth", 1, {"flax": 3}, "loom"),
+    Recipe("hacke", 1, {"wood": 2, "iron_ingot": 1}, "smithy"),
+    Recipe("pflug", 1, {"wood": 8, "iron_ingot": 3, "rope": 2}, "smithy"),
     Recipe("bread", 2, {"flour": 1}, "oven"),
     Recipe("fish", 1, {"fish": 1}, "campfire"),
     Recipe("cloth", 1, {"wool": 3}, "loom"),

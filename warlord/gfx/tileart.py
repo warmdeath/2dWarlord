@@ -12,6 +12,7 @@ from ..settings import TILE
 from ..world import tiles as T
 
 VARIANTS = 4
+SEASON = 1          # 0 spring, 1 summer, 2 autumn, 3 winter — set by the renderer
 _cache = {}
 _bg_cache = {}
 _cap_cache = {}
@@ -69,9 +70,28 @@ def _draw_base(t, rng, var):
         pygame.draw.line(s, _shade(c, 1.2), (4, 0), (4, TILE), 1)
     elif st == "leaves":
         s.fill((0, 0, 0, 0))
-        for _ in range(9):
-            x, y = rng.randrange(TILE), rng.randrange(TILE)
-            pygame.draw.circle(s, _shade(c, rng.uniform(0.8, 1.2)), (x, y), rng.randint(3, 5))
+        pine = t.key == "pine"
+        if SEASON == 2 and not pine:
+            palette = [(196, 120, 40), (214, 160, 50), (170, 70, 40), (150, 140, 60)]
+        elif SEASON == 3 and not pine:
+            palette = None
+        else:
+            palette = [c]
+        if palette is None:
+            # winter: bare twigs
+            for _ in range(3):
+                x, y = rng.randrange(TILE), rng.randrange(TILE)
+                pygame.draw.line(s, (92, 70, 50), (x, y), (x + rng.randint(-4, 4), y + rng.randint(-4, 4)), 1)
+        else:
+            for _ in range(9):
+                x, y = rng.randrange(TILE), rng.randrange(TILE)
+                pygame.draw.circle(s, _shade(rng.choice(palette), rng.uniform(0.8, 1.2)), (x, y), rng.randint(3, 5))
+            if SEASON == 0 and not pine and rng.random() < 0.6:
+                for _ in range(3):
+                    s.set_at((rng.randrange(2, 14), rng.randrange(2, 14)), (246, 220, 230))
+            if SEASON == 3 and pine:
+                for _ in range(4):
+                    pygame.draw.circle(s, (236, 240, 246), (rng.randrange(TILE), rng.randrange(0, 6)), 2)
     elif st == "planks":
         s.fill(c)
         for y in (0, 5, 10, 15):
@@ -138,6 +158,34 @@ def _draw_base(t, rng, var):
         pygame.draw.rect(s, c, (0, 0, TILE, 4))
         pygame.draw.line(s, _shade(c, 0.6), (0, 4), (TILE, 4))
         pygame.draw.line(s, _shade(c, 0.7), (3, 4), (6, 10), 2)
+    elif st == "portcullis":
+        s.fill((0, 0, 0, 0))
+        for x in (1, 7, 13):
+            pygame.draw.rect(s, c, (x, 0, 2, TILE))
+        for y in (3, 10):
+            pygame.draw.rect(s, _shade(c, 1.2), (0, y, TILE, 2))
+    elif st == "pechnase":
+        s.fill(_shade(c, 0.7))
+        pygame.draw.rect(s, c, (0, 0, TILE, 9))
+        pygame.draw.rect(s, (20, 16, 16), (5, 9, 6, 7))
+        pygame.draw.polygon(s, _shade(c, 1.15), [(0, 0), (TILE, 0), (TILE - 3, 4), (3, 4)])
+    elif st == "prop":
+        s.fill((0, 0, 0, 0))
+        pygame.draw.rect(s, c, (5, 0, 6, TILE))
+        pygame.draw.rect(s, _shade(c, 1.2), (5, 0, 2, TILE))
+        pygame.draw.rect(s, _shade(c, 0.8), (0, 0, TILE, 3))
+    elif st == "logwall":
+        s.fill(_shade(c, 0.8))
+        for y in (0, 8):
+            pygame.draw.rect(s, c, (0, y + 1, TILE, 6), border_radius=3)
+            pygame.draw.line(s, _shade(c, 1.2), (1, y + 2), (TILE - 2, y + 2))
+        pygame.draw.circle(s, _shade(c, 0.6), (2, 4), 2)
+    elif st == "birch":
+        s.fill((0, 0, 0, 0))
+        pygame.draw.rect(s, c, (5, 0, 6, TILE))
+        for _ in range(3):
+            y = rng.randrange(TILE)
+            pygame.draw.line(s, (40, 40, 40), (5, y), (8, y), 1)
     elif st == "farmland":
         s.fill(c)
         for y in (3, 8, 13):
@@ -156,7 +204,33 @@ def _deco(t, rng, var):
     b = h  # bottom
     c = t.color
     st = t.style
-    if st == "torch":
+    if st == "chain":
+        for k in range(5):
+            pygame.draw.ellipse(s, (80, 80, 88), (1 + k * 3, 1 + k * 3, 5, 3), 1)
+    elif st == "fern":
+        for a in (-0.9, -0.4, 0.1, 0.6, 1.0):
+            ex, ey = 8 + math.sin(a) * 8, 16 - math.cos(a) * 11
+            pygame.draw.line(s, _shade(c, 0.9), (8, 16), (ex, ey), 2)
+            pygame.draw.line(s, _shade(c, 1.2), (8 + (ex - 8) * 0.5, 16 + (ey - 16) * 0.5), (ex, ey), 1)
+    elif st == "reed":
+        for i in range(4):
+            x = 3 + i * 3
+            pygame.draw.line(s, _shade(c, rng.uniform(0.8, 1.1)), (x, b), (x + rng.randint(-1, 1), b - 14 - i % 2 * 4), 1)
+            pygame.draw.ellipse(s, (110, 80, 50), (x - 1, b - 16 - i % 2 * 4, 3, 6))
+    elif st == "heather":
+        for _ in range(7):
+            pygame.draw.circle(s, _shade(c, rng.uniform(0.8, 1.2)), (rng.randrange(3, 13), rng.randrange(8, 15)), 2)
+        pygame.draw.line(s, (90, 110, 60), (4, 16), (12, 16), 2)
+    elif st == "portcullis_up":
+        for x in (1, 7, 13):
+            pygame.draw.polygon(s, (60, 60, 66), [(x, 0), (x + 2, 0), (x + 1, 4)])
+    elif st == "winch":
+        pygame.draw.circle(s, (110, 80, 50), (8, 9), 6)
+        pygame.draw.circle(s, (80, 58, 36), (8, 9), 6, 2)
+        for a in range(4):
+            ang = a * math.pi / 2 + 0.4
+            pygame.draw.line(s, (80, 58, 36), (8, 9), (8 + math.cos(ang) * 7, 9 + math.sin(ang) * 7), 2)
+    elif st == "torch":
         pygame.draw.line(s, (90, 60, 30), (8, 15), (8, 7), 2)
         pygame.draw.circle(s, (255, 200, 80), (8, 5), 3)
         pygame.draw.circle(s, (255, 250, 200), (8, 5), 1)
@@ -165,6 +239,20 @@ def _deco(t, rng, var):
         pygame.draw.line(s, (90, 60, 30), (2, 12), (14, 15), 3)
         pygame.draw.polygon(s, (255, 140, 40), [(4, 13), (8, 2), (12, 13)])
         pygame.draw.polygon(s, (255, 230, 120), [(6, 13), (8, 7), (10, 13)])
+    elif st == "crop" and t.extra.get("crop") == "turnip":
+        stage = t.extra["stage"]
+        if stage >= 2:
+            pygame.draw.ellipse(s, (226, 214, 190), (4, 12, 8, 5))
+        for i in range(3):
+            pygame.draw.ellipse(s, _shade(c, 0.9 + i * 0.1), (2 + i * 4, 12 - stage * 2, 5, 3 + stage * 2))
+    elif st == "crop" and t.extra.get("crop") == "flax":
+        stage = t.extra["stage"]
+        for i in range(4):
+            x = 2 + i * 4
+            top = 16 - stage * 3 - 2
+            pygame.draw.line(s, (90, 140, 80) if stage < 4 else (170, 150, 90), (x, 16), (x, top), 1)
+            if stage == 3:
+                pygame.draw.circle(s, (120, 150, 220), (x, top), 2)
     elif st == "crop":
         stage = t.extra["stage"]
         for i in range(4):
@@ -339,6 +427,27 @@ def branch_surface(var):
     if s is None:
         s = pygame.transform.rotate(tile_surface(T.LOG.id, var, 0), 90)
         _cache[key] = s
+    return s
+
+
+def set_season(season):
+    global SEASON
+    if season != SEASON:
+        SEASON = season
+        _cache.clear()
+        _cap_cache.clear()
+
+
+def snow_cap(var):
+    key = ("snow", var)
+    s = _cap_cache.get(key)
+    if s is None:
+        rng = random.Random(var * 7)
+        s = pygame.Surface((TILE, 8), pygame.SRCALPHA)
+        pygame.draw.rect(s, (240, 244, 250), (0, 2, TILE, 5))
+        for x in range(0, TILE, 3):
+            pygame.draw.circle(s, (248, 250, 255), (x + 1, 3), rng.randint(1, 2))
+        _cap_cache[key] = s
     return s
 
 

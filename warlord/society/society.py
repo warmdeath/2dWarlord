@@ -188,8 +188,9 @@ class Society:
                         f = fields[rng.randrange(len(fields))] if fields else None
                         fr = (f["x0"], f["x1"]) if f else None
                         gear = ("sichel", "", "kleidung", "") if job == "farmer" else ("spitzhacke", "", "kleidung", "")
-                        add(job, 0 if k != "luebenau" else 1, bedx=bed, field_=fr, gear=gear,
-                            work=(f["work"] * TILE if f else wx))
+                        fp = add(job, 0 if k != "luebenau" else 1, bedx=bed, field_=fr, gear=gear,
+                                 work=(f["work"] * TILE if f else wx))
+                        fp.crop = f.get("crop", "wheat") if f else "wheat"
                         add(rng.choice(["farmer", "shepherd", "weaver"]), 0, female=True, bedx=bed,
                             work=(f["work"] * TILE if f else hx), field_=fr)
                         if rng.random() < 0.5:

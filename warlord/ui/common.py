@@ -93,6 +93,7 @@ def bilingual(surf, line, pos, size=16, width=600, base=(236, 232, 222), german=
             surf.blit(ff.render(wtxt, True, german if is_de else base), (x, y))
             x += ww + (space if trailing else 0)
         y += lh
+    gl = [(de, en) for de, en in gl if en]
     if gloss and gl:
         g = "  ·  ".join(f"{de} = {en}" for de, en in dict(gl).items())
         gf = font(max(11, size - 4))
@@ -105,6 +106,56 @@ def bilingual(surf, line, pos, size=16, width=600, base=(236, 232, 222), german=
         surf.blit(gf.render(g, True, col), (gx, y + 1))
         y += gf.get_linesize() + 2
     return y - pos[1]
+
+
+def ltext(surf, english, pos, size=14, color=(235, 230, 220), center=False, right=False, shadow=True, dark=False):
+    """A UI label in English, woven with the German you're learning: Deutsch (english) / Deutsch."""
+    from ..society import lingua
+    L = lingua.get()
+    woven = L.weave(english)
+    if woven != english:
+        L.count_text(woven, throttle=True)
+    segs = []
+    pos_ = 0
+    from ..society.dialogue import TOKEN
+    for m in TOKEN.finditer(woven):
+        if m.start() > pos_:
+            segs.append((woven[pos_:m.start()], "plain"))
+        segs.append((m.group(1), "de"))
+        if m.group(2):
+            segs.append((f" ({m.group(2)})", "gloss"))
+        pos_ = m.end()
+    if pos_ < len(woven):
+        segs.append((woven[pos_:], "plain"))
+    f = font(size)
+    fg = font(max(10, size - 3))
+    imgs = []
+    gcol = GERMAN_COLOR if not dark else (150, 60, 20)
+    for t, kind in segs:
+        ff = fg if kind == "gloss" else f
+        col = gcol if kind == "de" else (GLOSS_COLOR if not dark else (110, 90, 70)) if kind == "gloss" else color
+        imgs.append((ff.render(t, True, col), ff.render(t, True, (0, 0, 0)) if shadow and not dark else None,
+                     kind))
+    total = sum(i[0].get_width() for i in imgs)
+    x, y = pos
+    if center:
+        x -= total // 2
+    if right:
+        x -= total
+    for img, sh, kind in imgs:
+        dy = (f.get_height() - img.get_height()) // 2 + (1 if kind == "gloss" else 0)
+        if sh is not None:
+            surf.blit(sh, (x + 1, y + dy + 1))
+        surf.blit(img, (x, y + dy))
+        x += img.get_width()
+    return total
+
+
+def item_label(key):
+    """English item name, woven: 'bread' -> 'Brot (bread)' -> 'Brot'."""
+    from ..items.items import ITEMS
+    d = ITEMS.get(key)
+    return d.en if d else key
 
 
 def bar(surf, x, y, w, h, frac, color, back=(40, 34, 30)):
