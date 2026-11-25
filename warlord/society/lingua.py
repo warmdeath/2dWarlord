@@ -247,7 +247,7 @@ _instance = None
 
 
 def _extend_with_items():
-    """Every item and tile name is vocabulary too (introduced after the core words)."""
+    """Every item name is vocabulary too (introduced after the core words)."""
     global _RX, _PHRASES
     from ..items.items import ITEMS
     added = False

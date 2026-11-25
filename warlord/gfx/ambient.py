@@ -6,7 +6,6 @@ import random
 import pygame
 
 from ..settings import TILE
-from ..world import tiles as T
 
 
 class Ambient:
@@ -50,11 +49,9 @@ class Ambient:
             x = ox + rng.uniform(0, vw)
             tx = int(x // TILE)
             if game.world.inside(tx, 0):
-                gy = game.world.surface[tx]
-                g = game.world.ground_at(tx, max(0, int(gy) - 20))
-                if g < game.world.h and game.world.biome_at(tx) in ("plains", "hills", "forest", "vineyard",
-                                                                     "edge", "moor", "coast"):
-                    self.bugs.append([x, g * TILE - rng.uniform(10, 50), 0.0, 0.0, kind, 0.0])
+                gy = game.world.surface_y(x)
+                if game.world.biome_at(tx) in ("plains", "hills", "forest", "vineyard", "edge", "moor", "coast"):
+                    self.bugs.append([x, gy - rng.uniform(10, 50), 0.0, 0.0, kind, 0.0])
         for b in self.bugs:
             b[5] += dt
             b[2] += rng.uniform(-60, 60) * dt
@@ -65,14 +62,13 @@ class Ambient:
             b[1] += b[3] * dt
         # autumn leaves drift from the crowns in view
         if season == 2 and rng.random() < dt * 6:
-            x = ox + rng.uniform(0, vw)
-            tx = int(x // TILE)
-            for ty in range(max(0, int(oy // TILE)), min(game.world.h, int((oy + vh) // TILE))):
-                if game.world.inside(tx, ty) and game.world.fg[tx, ty] == T.LEAVES.id:
-                    col = rng.choice([(196, 120, 40), (214, 160, 50), (170, 70, 40)])
-                    game.fx._p(tx * TILE + 8, ty * TILE + 8, env.wind * 40 + rng.uniform(-10, 10), 10,
-                               rng.uniform(3, 6), col, 2, 12)
-                    break
+            trees = [t for t in game.world.near("tree_chunks", ox, ox + vw)
+                     if t.state == "stand" and t.kind not in ("pine", "fir", "dead")]
+            if trees:
+                t = rng.choice(trees)
+                col = rng.choice([(196, 120, 40), (214, 160, 50), (170, 70, 40)])
+                game.fx._p(t.x + rng.uniform(-t.h * 0.25, t.h * 0.25), t.y - t.h * rng.uniform(0.5, 0.9),
+                           env.wind * 40 + rng.uniform(-10, 10), 10, rng.uniform(3, 6), col, 2, 12)
         # smoke from chimneys and kilns in view (more in the evening and in winter)
         hour = env.hour()
         rate = 0.25 + (0.6 if hour > 17 or hour < 8 else 0) + (0.6 if season == 3 else 0)

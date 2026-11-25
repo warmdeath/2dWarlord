@@ -3,10 +3,11 @@
 Defences  : Graben (moat), Zugbrücke (drawbridge), Fallgatter (portcullis), Pechnase (machicolation)
 Engines   : Rammbock under a 'Katze' roof, Blide (counterweight trebuchet), Belagerungsturm (siege tower),
             Donnerbüchse (an experimental powder gun — rare, loud, and liable to burst)
-Assault   : Sturmleitern (ladders: real tiles that real soldiers climb, and that defenders can push away),
+Assault   : Sturmleitern (ladders: real objects that real soldiers climb, and that defenders push away),
             Mineure (sappers: dig a real tunnel, prop the wall on timber, burn the props -> the wall falls),
             Rampe (attackers stuck in a moat shovel earth into it until they can climb out)
-Everything acts on the tile world, so the physics engine decides what stands and what falls.
+Everything acts on the polygon world: walls are pieces with a support graph, so what loses its footing
+falls as rigid bodies.
 """
 import math
 import random
@@ -14,7 +15,9 @@ import random
 import pygame
 
 from ..settings import TILE
-from ..world import tiles as T
+from ..poly import prefab as PF
+from ..poly.objects import PhysObject
+from ..poly.materials import MATS
 
 ENGINES = {
     #           de                    en                  w    h    hp   crew speed reload
@@ -27,39 +30,26 @@ ENGINES = {
 
 # ================================================================== defences
 def set_defenses(game, gh, closed):
-    """Raise the drawbridge and drop the portcullis (closed) — or the reverse."""
-    w = game.world
-    if gh.get("closed") == closed:
+    """Raise the drawbridge and drop the portcullis (closed) — or the reverse. The winch does the rest."""
+    if gh.closed == closed:
         return
-    gh["closed"] = closed
-    if closed:
-        for (x, y) in gh["bridge"]:
-            if w.fg[x, y] == T.BRIDGE.id:
-                w.set(x, y, 0)
-        for (x, y) in gh["bridge_up"]:
-            if w.fg[x, y] == 0:
-                w.set(x, y, T.BRIDGE_UP.id)
-        for (x, y) in gh["portcullis"]:
-            if w.fg[x, y] in (0, T.PORTCULLIS_UP.id):
-                w.set(x, y, T.PORTCULLIS.id)
-        game.sfx("gate")
-    else:
-        for (x, y) in gh["bridge_up"]:
-            if w.fg[x, y] == T.BRIDGE_UP.id:
-                w.set(x, y, 0)
-        for (x, y) in gh["bridge"]:
-            if w.fg[x, y] == 0:
-                w.set(x, y, T.BRIDGE.id)
-        for (x, y) in gh["portcullis"]:
-            if w.fg[x, y] == T.PORTCULLIS.id:
-                w.set(x, y, T.PORTCULLIS_UP.id)
-        game.sfx("gate")
+    gh.closed = closed
+    game.sfx("gate")
+
+
+def gatehouse_near(game, x, r=400):
+    best, bd = None, r
+    for gh in game.world.gatehouses:
+        d = abs(gh.hinge[0] - x)
+        if d < bd:
+            best, bd = gh, d
+    return best
 
 
 def gatehouse_owner(game, gh):
-    s = game.world.settlement_at(gh["x"], margin=24)
+    s = game.world.settlement_at(gh.x, margin=24)
     if s is None:
-        return getattr(gh, "owner", None) or gh.get("owner")
+        return gh.owner
     if s["type"] == "robber":
         return "bandit"
     si = game.world.settlements.index(s)
@@ -68,13 +58,14 @@ def gatehouse_owner(game, gh):
 
 def pour_pitch(game, gh, by=None):
     """Boiling pitch through the machicolation: burns whatever stands below."""
-    px, py = gh["pechnase"]
-    x = px * TILE + 8
+    x, py = gh.pechnase
+    x -= gh.side * 4
+    gy = gh.hinge[1]
     for _ in range(14):
-        game.fx._p(x + random.uniform(-4, 4), (py + 1) * TILE, random.uniform(-20, 20), random.uniform(60, 160),
+        game.fx._p(x + random.uniform(-4, 4), py + 14, random.uniform(-20, 20), random.uniform(60, 160),
                    1.0, (30, 24, 20), 3, 900)
-    game.fx.fire(x, gh["g"] * TILE - 6, 10)
-    game.fx.text(x, py * TILE - 10, "Pech!", (255, 160, 90), gloss="boiling pitch!")
+    game.fx.fire(x, gy - 6, 10)
+    game.fx.text(x, py - 10, "Pech!", (255, 160, 90), gloss="boiling pitch!")
     game.sfx("hiss")
     side = gatehouse_owner(game, gh)
     for hf in game.formations:
@@ -86,7 +77,7 @@ def pour_pitch(game, gh, by=None):
                 hf._kill_member(x)
             hf.morale -= 12
     for h in game.targets_near(x, 40):
-        if not getattr(h, "dead", False) and h.feet > py * TILE:
+        if not getattr(h, "dead", False) and h.feet > py + 20:
             h.take_hit(game, by, 30, "blunt", 30, ("unblockable",), source_x=x)
     for e in game.engines:
         if abs(e.x - x) < e.w / 2 + 20:
@@ -130,13 +121,12 @@ class SiegeEngine:
     # geometry ---------------------------------------------------------------
     def ground(self, game):
         w = game.world
-        tx = max(0, min(w.w - 1, int(self.x // TILE)))
         if self.row is None:
-            self.row = w.ground_at(tx, max(0, int(w.surface[tx]) - 30))
-        row = w.ground_at(tx, max(0, self.row - 2))
-        if row >= self.row - 2 and row < w.h:
-            self.row = row
-        return self.row * TILE
+            self.row = w.ground_y(self.x, w.surface_y(self.x) - 300, 700)
+        gy = w.ground_y(self.x, self.row - 30, 200)
+        if gy >= self.row - 28 and gy < w.pixel_h():
+            self.row = gy
+        return self.row
 
     @property
     def cx(self):
@@ -207,26 +197,18 @@ class SiegeEngine:
     def _advance(self, game, dt):
         w = game.world
         gy = self.ground(game)
-        feet = int(gy // TILE) - 1
         lead = self.x + self.facing * (self.w / 2 + 2)
-        tx = int(lead // TILE)
         blocked = None
-        # how tall is whatever is in front of us? wheels roll up a step of up to 2 tiles
-        height = 0
-        while height < 6 and w.inside(tx, feet - height) and T.SOLID[w.fg[tx, feet - height]]:
-            height += 1
-        if height > 2 or (height and any(w.inside(tx, feet - k) and T.SOLID[w.fg[tx, feet - k]]
-                                         for k in range(height + 1, height + 3))):
-            for ty in range(feet - 3, feet + 1):
-                if w.inside(tx, ty) and T.SOLID[w.fg[tx, ty]]:
-                    blocked = (tx, ty)
-                    break
-        elif height:
-            self.row -= height   # climb the step
+        # wheels roll up a step of up to 2 tiles; anything taller stops us
+        for hgt in (36, 52, 70, 100):
+            if w.solid_point(lead, gy - hgt):
+                pc = PF.piece_at(w, lead, gy - hgt, solid_only=True)
+                blocked = pc if pc is not None else ("bank", lead, gy - hgt)
+                break
         # a drop we can't roll down (an unfilled moat)
-        drop = w.ground_at(tx, max(0, self.row - 2)) - self.row
-        if blocked is None and drop > 2:
-            self.blocked = ("drop", tx)
+        ahead = w.ground_y(lead, gy - 30, 300)
+        if blocked is None and ahead - gy > 34:
+            self.blocked = ("drop", lead)
             return
         self.blocked = blocked
         if blocked is None:
@@ -238,19 +220,19 @@ class SiegeEngine:
             if self.strike_t <= 0:
                 self.strike_t = self.reload_time
                 self.fire_anim = 0.5
-                bx = blocked[0]
                 hit = False
-                for ty in range(feet - 3, feet + 1):
-                    if w.inside(bx, ty) and T.SOLID[w.fg[bx, ty]]:
-                        game.damage_tile(bx, ty, 5.5 * min(1.0, self.crew / 5.0), None)
+                for hgt in (12, 28, 44):
+                    pc = PF.piece_at(w, lead + self.facing * 3, gy - hgt, solid_only=True)
+                    if pc is not None:
+                        power = 16.0 * min(1.0, self.crew / 5.0) * (2.0 if pc.role == "door" else 1.0)
+                        game.damage_piece(pc, power / max(0.5, MATS[pc.mat].hard), impulse=(self.facing * 400, 0))
                         hit = True
                 if hit:
-                    game.fx.debris(bx * TILE + 8, (feet - 1) * TILE, (110, 80, 50), 8)
+                    game.fx.debris(lead, gy - 30, (110, 80, 50), 8)
                     game.camera.shake = max(game.camera.shake, 3)
                     game.sfx("impact")
-                    game.fx.text(bx * TILE, (feet - 4) * TILE, "Rumms!", (240, 210, 160), gloss="thud!", life=0.7)
+                    game.fx.text(lead, gy - 70, "Rumms!", (240, 210, 160), gloss="thud!", life=0.7)
         elif self.key == "turm":
-            # dock against the wall and let the men across
             if not self.docked:
                 self.docked = True
                 game.fx.text(self.x, gy - self.h - 10, "Brücke runter!", (255, 220, 150), gloss="drop the bridge!")
@@ -259,19 +241,20 @@ class SiegeEngine:
             hf = self.carry
             if hf is not None and not hf.dead and hf.members and self.dock_t <= 0:
                 self.dock_t = self.reload_time
-                top = self._wall_top(game, blocked[0])
+                top = self._wall_top(game, lead + self.facing * 8)
                 if top is not None:
-                    spawn_assault_fighter(game, hf, blocked[0] * TILE + 8 + self.facing * 10, top * TILE)
+                    spawn_assault_fighter(game, hf, lead + self.facing * 14, top)
 
     def _wall_top(self, game, wx):
+        """The walk on top of the wall in front of the tower (pixel y), if the tower reaches it."""
         w = game.world
-        y = self.row - 1
-        while y > 0 and w.inside(wx, y) and T.SOLID[w.fg[wx, y]]:
-            y -= 1
-        if self.row - y > 13:
+        gy = self.ground(game)
+        y = gy - 4
+        while y > gy - self.h - 20 and w.solid_point(wx, y):
+            y -= 4
+        if gy - y > self.h - 8:
             return None
-        # stand on the battlement walk just behind the parapet
-        return y + 1 if T.SOLID[w.fg[wx, y + 1]] else y
+        return y + 2
 
     def _find_target(self, game):
         rng_min, rng_max = (260, 2100) if self.key == "blide" else (80, 1300)
@@ -288,10 +271,23 @@ class SiegeEngine:
             owner = gatehouse_owner(game, gh)
             if owner is None or not game.hostile_factions(self.side, owner):
                 continue
-            px = gh["portcullis"][0][0] * TILE + 8
+            px = gh.port_x
             d = (px - self.x) * self.facing
             if rng_min < d < rng_max and (best is None or d < best[0] * 1.6):
-                best = (d, px + self.facing * random.choice((0, 16, 40)), (gh["g"] - random.randint(3, 9)) * TILE)
+                best = (d, px + self.facing * random.choice((0, 16, 40)), gh.hinge[1] - random.randint(3, 9) * TILE)
+        # any hostile wall in range
+        if best is None:
+            for s in game.world.settlements:
+                si = game.world.settlements.index(s)
+                owner = "bandit" if s["type"] == "robber" else game.society.owner.get(si, s["kingdom"])
+                if not game.hostile_factions(self.side, owner):
+                    continue
+                for r in s["buildings"]:
+                    if r["kind"] in ("wall", "gatehouse", "tower", "keep"):
+                        px = (r["x0"] + 1) * TILE
+                        d = (px - self.x) * self.facing
+                        if rng_min < d < rng_max and (best is None or d < best[0]):
+                            best = (d, px, r["g"] * TILE - random.randint(2, 8) * TILE)
         if best is None:
             return None
         return best[1], best[2]
@@ -471,23 +467,25 @@ def ramp(game, hf, dt):
     hf.ramp_t = getattr(hf, "ramp_t", 0.0) - dt
     if hf.ramp_t > 0:
         return
-    hf.ramp_t = 0.55 / max(1, min(3, len(hf.front)))
+    hf.ramp_t = 0.45 / max(1, min(3, len(hf.front)))
     f = hf.facing
-    fx = int(hf.x // TILE)
-    row = hf.base_row
-    for k in range(0, 6):
-        cx = fx - f * k
-        cy = row - 1
-        if w.inside(cx, cy) and not T.SOLID[w.fg[cx, cy]]:
-            w.liq[cx, cy] = 0
-            w.mark_liquid(cx, cy)
-            w.set(cx, cy, T.DIRT.id)
-            game.fx.dust(cx * TILE + 8, cy * TILE + 8, 3, (112, 78, 52))
-            if random.random() < 0.15:
-                hf.shout = ["[Rampe aufschütten|build up the ramp]!", 1.5]
-            return
-    # this layer is done: everyone steps up one tile
+    i = int((hf.x + f * 10) // TILE)
+    # raise the ground under the front a little, sloping back toward the formation
+    for k in range(0, 5):
+        col = i - f * k
+        if 0 <= col < w.w:
+            target = w.top[col] - (5 - k) * 2.5
+            w.top[col] = max(target, w.top[col] - 6)
+    lo, hi = min(i, i - f * 5), max(i, i - f * 5)
+    w.set_surface(lo, hi + 1, w.top[lo:hi + 1].copy())
+    for wr in w.water:
+        if wr.x0 <= hf.x <= wr.x1 and not wr.lava and wr.x1 - wr.x0 < 200:
+            # the moat fills with earth: its water level effectively drops under the ramp
+            pass
+    game.fx.dust(hf.x + f * 10, hf.ground(hf.x), 3, (112, 78, 52))
     hf.y_cache.clear()
+    if random.random() < 0.12:
+        hf.shout = ["[Rampe aufschütten|build up the ramp]!", 1.5]
 
 
 def ladder(game, hf, blocked, dt):
@@ -495,96 +493,118 @@ def ladder(game, hf, blocked, dt):
     w = game.world
     f = hf.facing
     lad = getattr(hf, "ladder", None)
-    wx = blocked[0]
-    feet = hf.base_row - 1
-    if lad is None or lad.get("wx") != wx:
-        y = feet
-        while y > 0 and w.inside(wx, y) and T.SOLID[w.fg[wx, y]]:
-            y -= 1
-        height = feet - y
-        if height > 14:
+    wx = blocked.bb[0] if f > 0 else blocked.bb[2]
+    gy = hf.ground(hf.x)
+    if lad is None or abs(lad.get("wx", 0) - wx) > 20 or lad.get("obj") is not None and lad["obj"].removed:
+        # how tall is the wall here?
+        y = gy - 8
+        while y > gy - 20 * TILE and w.solid_point(wx + f * 3, y):
+            y -= 4
+        height = gy - y
+        if height > 15 * TILE:
             return False
-        hf.ladder = lad = {"wx": wx, "x": wx - f, "top": y + 1, "t": 2.5, "up": False, "climb": 0.0}
+        hf.ladder = lad = {"wx": wx, "x": wx - f * 10, "top": y, "t": 2.5, "up": False, "climb": 0.0, "obj": None}
         hf.shout = ["[Leitern an die Mauer|ladders to the wall]!", 2.0]
     if not lad["up"]:
         lad["t"] -= dt
         if lad["t"] <= 0:
             lad["up"] = True
-            for yy in range(lad["top"] - 1, feet + 1):
-                if w.inside(lad["x"], yy) and w.fg[lad["x"], yy] == 0:
-                    w.set(lad["x"], yy, T.LADDER.id)
-            game.ladders.append({"x": lad["x"], "top": lad["top"] - 1, "bottom": feet, "side": hf.side, "t": 0.0,
+            L = gy - lad["top"] + 10
+            pts = [(-6, -L / 2), (6, -L / 2), (6, L / 2), (-6, L / 2)]
+            o = PhysObject.spawn(w, pts, lad["x"], gy - L / 2, "timber", "crafted", item="ladder",
+                                 shape_key="ladder", angle=f * 0.12)
+            o.anchor(True)
+            game.on_anchor(o)
+            lad["obj"] = o
+            game.ladders.append({"obj": o, "x": lad["x"], "top": lad["top"], "bottom": gy, "side": hf.side, "t": 0.0,
                                  "hf": hf})
             game.sfx("place")
         return True
-    if w.fg[lad["x"], feet] != T.LADDER.id:     # pushed away — raise it again
+    o = lad["obj"]
+    if o is None or o.removed or not o.anchored:      # pushed away — raise it again
         hf.ladder = None
         return True
     lad["climb"] -= dt
     if lad["climb"] <= 0 and hf.members:
         lad["climb"] = 1.3
-        h = spawn_assault_fighter(game, hf, lad["x"] * TILE + 8, (feet + 1) * TILE)
+        h = spawn_assault_fighter(game, hf, lad["x"], gy)
         if h is not None:
             game.set_brain(h, "climb")
-            h.climb_target = (lad["x"], lad["top"], wx)
+            h.climb_target = (lad["x"], lad["top"], lad["wx"])
     return True
 
 
 def sap(game, hf, blocked, dt):
     """Mineure: dig under the wall, hold it up on timber props, then burn the props."""
+    from shapely.geometry import box
     w = game.world
     f = hf.facing
     job = getattr(hf, "sap", None)
-    if job is not None and job.get("wx") != blocked[0] and job["lit"]:
+    if job is not None and job["lit"] and (blocked is None or abs(job["wx"] - blocked.cx) > 30):
         job = None                       # that wall is down: start on the next one
     if job is None:
-        wx = blocked[0]
-        r0 = hf.base_row
-        ex = wx - f * 4
-        ops = []
-        for y in range(r0, r0 + 4):
-            ops.append(("dig", ex, y))
-        x = ex + f
-        while x != wx:
-            for y in (r0 + 1, r0 + 2, r0 + 3):
-                ops.append(("dig", x, y))
-            x += f
-        cols = [wx + f * k for k in range(0, 6)]
-        for cx in cols:
-            for y in (r0 + 1, r0 + 2, r0 + 3):
-                ops.append(("dig", cx, y))
-            ops.append(("prop", cx, r0))
-        hf.sap = job = {"ops": ops, "i": 0, "t": 0.0, "cols": cols, "row": r0, "lit": False, "fuse": 4.0, "wx": wx}
+        b = PF.building(w, blocked.bld)
+        if b is None:
+            return False
+        gy = hf.ground(hf.x)
+        x_in = blocked.bb[0] - 3 * TILE if f > 0 else blocked.bb[2] + 3 * TILE
+        x_end = (b.x1 + 8) if f > 0 else (b.x0 - 8)
+        hf.sap = job = {"x": x_in, "end": x_end, "gy": gy, "t": 0.0, "lit": False, "fuse": 4.0, "wx": blocked.cx,
+                        "bld": b.id, "props": [], "step": 0}
         hf.shout = ["[Untergraben|undermine]!", 2.0]
-    if job["i"] < len(job["ops"]):
+    if not job.get("dug"):
         job["t"] -= dt
         if job["t"] > 0:
             return True
-        job["t"] = 0.55
-        op, x, y = job["ops"][job["i"]]
-        job["i"] += 1
-        if not w.inside(x, y):
-            return True
-        if op == "dig":
-            if w.fg[x, y] and w.fg[x, y] != T.BEDROCK.id and not T.BUILT[w.fg[x, y]]:
-                w.set(x, y, 0)
-                w.set_bg(x, y, T.BG_DIRT)
-        else:
-            if w.fg[x, y] != T.BEDROCK.id:
-                w.fg[x, y] = T.PROP.id     # swap foundation for timber in one move
-                w.mark(x, y)
-        game.fx.dust(x * TILE + 8, y * TILE + 8, 3, (112, 78, 52))
-        if job["i"] % 6 == 0:
+        job["t"] = 0.5
+        x0 = job["x"]
+        x1 = x0 + f * 16
+        gy = job["gy"]
+        # the shaft goes down at first, then runs level under the wall
+        depth = min(3, job["step"]) * 12 + 14
+        tunnel = box(min(x0, x1) - 1, gy + depth - 30, max(x0, x1) + 1, gy + depth + 6)
+        w.add_cave(tunnel)
+        game.fx.dust(x0, gy + depth, 3, (112, 78, 52))
+        if job["step"] % 5 == 0:
             game.sfx("dig")
+        job["step"] += 1
+        job["x"] = x1
+        # under the wall: take the foundation out and set a timber prop in its place
+        bld = PF.building(w, job["bld"])
+        if bld is not None and bld.x0 - 8 <= x1 <= bld.x1 + 8:
+            for pid in list(bld.pieces):
+                pc = w.pieces.get(pid)
+                if pc is not None and pc.grounded and pc.solid and pc.bb[0] <= x1 + 8 and pc.bb[2] >= x1 - 8:
+                    pc.grounded = False
+            B = PF.Builder(w, "props", "wood")
+            prop = B.rect(x1 - 4, gy + depth - 30, x1 + 4, gy + 4, "timber", "prop", detail="grain")
+            B.finish(None)
+            prop.grounded = True
+            prop.bld_target = job["bld"]
+            bld.pieces.append(prop.id)
+            bld2 = PF.building(w, prop.bld)
+            if bld2 is not None and prop.id in bld2.pieces:
+                bld2.pieces.remove(prop.id)
+            prop.bld = job["bld"]
+            for pid in bld.pieces:
+                pc = w.pieces.get(pid)
+                if pc is not None and pc.solid and pc.bb[0] <= x1 + 10 and pc.bb[2] >= x1 - 10 and pc.id != prop.id:
+                    if pc.bb[3] >= gy - 3:
+                        pc.below.append(prop.id)
+            job["props"].append(prop.id)
+        if (job["x"] - job["end"]) * f > 0:
+            job["dug"] = True
         return True
     if not job["lit"]:
         job["fuse"] -= dt
         if job["fuse"] <= 0:
             job["lit"] = True
-            for cx in job["cols"]:
-                game.ignite(cx, job["row"])
+            for pid in job["props"]:
+                pc = w.pieces.get(pid)
+                if pc is not None:
+                    game.ignite_piece(pc)
             hf.shout = ["[Feuer an die Stützen|fire the props]!", 2.5]
-            game.fx.text(job["cols"][0] * TILE, (job["row"] - 4) * TILE, "Die Stützen brennen!", (255, 170, 100),
+            game.fx.text(job["x"], job["gy"] - 60, "Die Stützen brennen!", (255, 170, 100),
                          gloss="the props are burning!")
     return True
 
@@ -594,7 +614,7 @@ def update(game, dt):
     w = game.world
     px = game.player.cx
     for gh in w.gatehouses:
-        gx = gh["x"] * TILE
+        gx = gh.hinge[0]
         if abs(gx - px) > 5200:
             continue
         owner = gatehouse_owner(game, gh)
@@ -610,36 +630,35 @@ def update(game, dt):
         for e in game.engines:
             if not e.dead and game.hostile_factions(owner, e.side) and abs(e.x - gx) < 70 * TILE:
                 threat = threat or (abs(e.x - gx), None)
-        if not gh.get("auto", True):
+        if not gh.auto:
             continue
         if threat is not None:
-            gh["calm"] = 0.0
-            if not gh.get("closed"):
+            gh.calm = 0.0
+            if not gh.closed:
                 set_defenses(game, gh, True)
-                game.fx.text(gx, (gh["g"] - 16) * TILE, "Zugbrücke hoch!", (255, 220, 150),
+                game.fx.text(gx, gh.hinge[1] - 16 * TILE, "Zugbrücke hoch!", (255, 220, 150),
                              gloss="raise the drawbridge!")
-            # pitch on whatever stands at the gate
-            gh["pitch_t"] = gh.get("pitch_t", 3.0) - dt
-            mx = gh["pechnase"][0] * TILE
+            gh.pitch_t -= dt
+            mx = gh.pechnase[0]
             near_gate = any(not e.dead and abs(e.x - mx) < e.w / 2 + 24 and game.hostile_factions(owner, e.side)
                             for e in game.engines)
             near_gate = near_gate or any(not hf.dead and hf.span()[0] - 24 <= mx <= hf.span()[1] + 24 and
                                          game.hostile_factions(owner, hf.side) for hf in game.formations)
-            if near_gate and gh["pitch_t"] <= 0 and gh.get("pitch", 6) > 0:
-                gh["pitch_t"] = 7.0
-                gh["pitch"] = gh.get("pitch", 6) - 1
+            if near_gate and gh.pitch_t <= 0 and gh.pitch > 0:
+                gh.pitch_t = 7.0
+                gh.pitch -= 1
                 pour_pitch(game, gh)
         else:
-            gh["calm"] = gh.get("calm", 0.0) + dt
-            if gh.get("closed") and gh["calm"] > 15:
+            gh.calm += dt
+            if gh.closed and gh.calm > 15:
                 set_defenses(game, gh, False)
     # ladders: a defender at the top shoves them off
     for lad in list(game.ladders):
-        x, top = lad["x"], lad["top"]
-        if w.fg[x, lad["bottom"]] != T.LADDER.id:
+        o = lad.get("obj")
+        if o is None or o.removed or not o.anchored:
             game.ladders.remove(lad)
             continue
-        lx, ly = x * TILE + 8, top * TILE
+        lx, ly = lad["x"], lad["top"]
         defender = None
         for h in game.humanoids:
             if h.dead or h.formation is not None or not game.hostile_factions(h.faction, lad["side"]):
@@ -652,14 +671,17 @@ def update(game, dt):
             continue
         lad["t"] += dt
         if lad["t"] > 2.5:
-            for y in range(lad["top"], lad["bottom"] + 1):
-                if w.fg[x, y] == T.LADDER.id:
-                    w.set(x, y, 0)
+            r = getattr(o, "ladder_rect", None)
+            if r is not None:
+                w.remove_ladder(r)
+            o.anchor(False)
+            if o.body is not None:
+                f = lad["hf"].facing if lad.get("hf") else 1
+                o.body.apply_impulse_at_local_point((-f * o.mass() * 160, 0), (0, -40))
             defender.say("[Leiter weg|away with the ladder]!", t=2)
             game.hear("[Leiter weg|away with the ladder]!", "siege")
-            game.fx.debris(lx, ly + 40, (140, 100, 60), 12)
             for h in game.humanoids:
-                if abs(h.cx - lx) < 12 and ly < h.feet < (lad["bottom"] + 1) * TILE + 4:
+                if abs(h.cx - lx) < 16 and ly < h.feet < lad["bottom"] + 4:
                     h.climbing = False
                     h.vx = -lad["hf"].facing * 120 if lad.get("hf") else 0
             game.ladders.remove(lad)
@@ -667,43 +689,47 @@ def update(game, dt):
     alive = [h for h in game.assaulters if not h.dead and not h.removed]
     game.assaulters = alive
     for gh in w.gatehouses:
-        if not gh.get("closed") and not gh.get("forced"):
+        if not gh.closed and not gh.forced:
             continue
-        gx = gh["portcullis"][0][0] * TILE
+        gx = gh.port_x
         near = [h for h in alive if abs(h.cx - gx) < 260 and game.hostile_factions(h.faction,
                                                                                     gatehouse_owner(game, gh) or "")]
         if len(near) >= 3:
-            gh["held"] = gh.get("held", 0.0) + dt
-            if gh["held"] > 8 and not gh.get("forced"):
-                gh["forced"] = True
-                gh["auto"] = False
+            gh.held += dt
+            if gh.held > 8 and not gh.forced:
+                gh.forced = True
+                gh.auto = False
                 set_defenses(game, gh, False)
-                for (x, y) in gh["portcullis"]:
-                    for dx in (-1, 0, 1, 2, -2):
-                        for yy in range(y - 1, y + 2):
-                            if w.inside(x + dx, yy) and w.fg[x + dx, yy] == T.GATE.id:
-                                w.set(x + dx, yy, T.GATE_OPEN.id)
-                game.fx.text(gx, (gh["g"] - 14) * TILE, "Das Tor ist offen!", (255, 230, 140),
+                for pid in w.near("piece_chunks", gx - 60, gx + 60):
+                    pc = w.pieces.get(pid)
+                    if pc is not None and pc.role == "door":
+                        PF.toggle_door(w, pc, True)
+                        pc.locked = False
+                game.fx.text(gx, gh.hinge[1] - 14 * TILE, "Das Tor ist offen!", (255, 230, 140),
                              gloss="the gate is open!")
                 game.sfx("horn")
         else:
-            gh["held"] = 0.0
+            gh.held = 0.0
 
 
 def impact(game, x, y, kind):
-    """A trebuchet stone or a powder ball strikes the world."""
+    """A trebuchet stone or a powder ball strikes the world: pieces near the impact take the blow."""
     w = game.world
-    tx, ty = int(x // TILE), int(y // TILE)
-    r = 2 if kind == "stone" else 1
-    power = 5.0 if kind == "stone" else 7.5
-    for dx in range(-r, r + 1):
-        for dy in range(-r, r + 1):
-            d = math.hypot(dx, dy)
-            if d > r + 0.3:
-                continue
-            cx, cy = tx + dx, ty + dy
-            if w.inside(cx, cy) and w.fg[cx, cy] and T.TILES[int(w.fg[cx, cy])].hardness < 999:
-                game.damage_tile(cx, cy, power * (1.0 - d / (r + 1.5)), None)
+    r = 30 if kind == "stone" else 20
+    power = 30.0 if kind == "stone" else 45.0
+    hit = []
+    for pid in list(w.near("piece_chunks", x - r - 40, x + r + 40)):
+        pc = w.pieces.get(pid)
+        if pc is None or not pc.solid or pc.state != "static":
+            continue
+        d = math.hypot(pc.cx - x, pc.cy - y) - max(pc.w, pc.h) / 2
+        if d < r:
+            hit.append((d, pc))
+    hit.sort(key=lambda t: t[0])
+    for d, pc in hit[:6]:
+        f = max(0.2, 1.0 - max(0.0, d) / r)
+        game.damage_piece(pc, power * f / max(0.5, MATS[pc.mat].hard) * 2.0,
+                          impulse=((pc.cx - x) * 20, (pc.cy - y) * 20))
     game.fx.debris(x, y, (150, 140, 130), 16)
     game.fx.dust(x, y, 14, (160, 150, 140))
     if abs(x - game.player.cx) < 1200:
@@ -715,3 +741,7 @@ def impact(game, x, y, kind):
     for e in game.engines:
         if not e.dead and e.contains(game, x, y + 4):
             e.damage(game, 70 if kind == "stone" else 90, 0.4)
+    # the stone itself stays where it fell
+    if kind == "stone":
+        pts = [(-7, -5), (-2, -8), (6, -6), (8, 2), (1, 7), (-6, 5)]
+        PhysObject.spawn(w, pts, x, y - 10, "rock", "debris", debris=True, item="stone")

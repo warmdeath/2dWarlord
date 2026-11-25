@@ -15,7 +15,7 @@ import random
 import pygame
 
 from ..settings import TILE, WALK_SPEED, RUN_SPEED, HORSE_GALLOP
-from ..world import tiles as T
+from ..poly import prefab as PF
 from ..society.names import make_look
 from ..gfx.sprites import soldier_sprite, FX as SFX, FY as SFY
 from .units import UNITS
@@ -76,7 +76,7 @@ class Haufen:
         self.selected = False
         self.flank_t = 0.0
         self.y_cache = {}
-        self.base_row = None
+        self.base_y = None
         self.last_casualty = 0.0
         self.recent_losses = 0
         self.follow_target = None
@@ -106,20 +106,26 @@ class Haufen:
         a, b = self.x, self.back_x()
         return (min(a, b), max(a, b))
 
+    @property
+    def base_row(self):
+        return None if self.base_y is None else int(self.base_y // TILE)
+
+    @base_row.setter
+    def base_row(self, row):
+        self.base_y = None if row is None else row * TILE
+        self.y_cache = {}
+
     def ground(self, px):
-        """Ground under column px at *our* level: we can climb a few tiles, but never onto a wall-top arch."""
+        """Ground under px at *our* level: we can climb a step or a slope, but never onto a wall top."""
         w = self.game.world
-        tx = max(0, min(w.w - 1, int(px // TILE)))
-        if self.base_row is None:
-            ref = int(w.surface[tx]) - 30
-            self.base_row = w.ground_at(tx, max(0, ref))
-        key = (tx, self.base_row)
+        if self.base_y is None:
+            self.base_y = w.ground_y(px, w.surface_y(px) - 300, 700)
+        key = int(px // 8)
         g = self.y_cache.get(key)
         if g is None:
-            row = w.ground_at(tx, max(0, self.base_row - 3))
-            if row < self.base_row - 2 or (row > 0 and T.SOLID[w.fg[tx, row - 1]]):
-                row = self.base_row          # a wall column: stand at our own level
-            g = row * TILE
+            g = w.ground_y(px, self.base_y - 40, 200)
+            if g < self.base_y - 34 or w.solid_point(px, g - 30):
+                g = self.base_y          # a wall: stand at our own level
             self.y_cache[key] = g
             if len(self.y_cache) > 600:
                 self.y_cache.clear()
@@ -127,13 +133,14 @@ class Haufen:
 
     def track_ground(self):
         w = self.game.world
-        tx = max(0, min(w.w - 1, int(self.x // TILE)))
-        if self.base_row is None:
+        if self.base_y is None:
             self.ground(self.x)
-        nb = w.ground_at(tx, max(0, self.base_row - 3))
-        # only follow walkable ground: a step of up to 2 tiles with headroom, or any drop
-        if nb < w.h and (nb >= self.base_row - 2) and not T.SOLID[w.fg[tx, nb - 1]]:
-            self.base_row = nb
+        nb = w.ground_y(self.x, self.base_y - 40, 220)
+        # only follow walkable ground: a step or slope we can climb with headroom, or any drop
+        if nb < w.pixel_h() and nb >= self.base_y - 34 and not w.solid_point(self.x, nb - 30):
+            if abs(nb - self.base_y) > 0.5:
+                self.base_y = nb
+                self.y_cache = {}
 
     def contains(self, px, py):
         a, b = self.span()
@@ -368,31 +375,25 @@ class Haufen:
         if self.speed == 0:
             return
         dx = self.facing * self.speed * dt
-        wtx = int(self.x // TILE)
-        wty = int(self.ground(self.x) // TILE) - 1
-        if g.world.inside(wtx, wty) and g.world.liq[wtx, wty] > 2:
+        w = g.world
+        gy = self.ground(self.x)
+        wl = w.water_level(self.x)
+        if wl is not None and gy > wl + 6:
             dx *= 0.45   # wading
         # obstacles: a wall or gate in the way
         lead = self.x + self.facing * 6 + dx
-        tx = int(lead // TILE)
-        gy = self.ground(self.x)
-        ty_feet = int(gy // TILE) - 1
-        w = g.world
         blocked_tile = None
-        for ty in range(ty_feet - 2, ty_feet + 1):
-            if w.inside(tx, ty) and T.SOLID[w.fg[tx, ty]]:
-                # a single step is fine
-                if ty == ty_feet and not (w.inside(tx, ty - 1) and T.SOLID[w.fg[tx, ty - 1]]):
-                    continue
-                blocked_tile = (tx, ty)
+        for hgt in (14, 28, 42):
+            if w.solid_point(lead, gy - hgt):
+                pc = PF.piece_at(w, lead, gy - hgt, solid_only=True)
+                blocked_tile = pc if pc is not None else ("bank", lead, gy - hgt)
                 break
-        if blocked_tile and self.speed > 0:
+        if blocked_tile is not None and self.speed > 0:
             self.blocked_by_tile = blocked_tile
             self.speed = 0
             if self.order in ("vorwaerts", "angriff") and self.front:
                 from . import siege
-                tid = int(w.fg[blocked_tile])
-                if not T.BUILT[tid]:
+                if not isinstance(blocked_tile, PF.Piece):
                     siege.ramp(g, self, dt)          # a bank or a cliff: shovel a ramp
                     return
                 if self.unit.key == "leiter" and siege.ladder(g, self, blocked_tile, dt):
@@ -400,15 +401,13 @@ class Haufen:
                 if self.unit.key == "mineure" and siege.sap(g, self, blocked_tile, dt):
                     return
             # siege: the front ranks hack at the gate / wall in their way
-            if self.order == "angriff" and self.front:
-                tid = int(w.fg[blocked_tile])
-                if T.TILES[tid].hardness < 999:
-                    power = 0.9 * len([f for f in self.front if not f.dead]) * (1.6 if tid in (T.GATE.id,
-                                                                                               T.DOOR.id) else 1.0)
-                    if g.damage_tile(blocked_tile[0], blocked_tile[1], power * dt, None) and \
-                            random.random() < 0.3:
-                        g.fx.text(blocked_tile[0] * TILE, blocked_tile[1] * TILE - 20, "Bresche!",
-                                  (255, 200, 120), gloss="breach!")
+            if self.order == "angriff" and self.front and isinstance(blocked_tile, PF.Piece):
+                pc = blocked_tile
+                power = 0.9 * len([f for f in self.front if not f.dead]) * (1.6 if pc.role == "door" else 1.0)
+                if g.damage_piece(pc, power * dt * 3.0 / max(0.5, __import__("warlord.poly.materials",
+                                                                             fromlist=["MATS"]).MATS[pc.mat].hard)) \
+                        and random.random() < 0.3:
+                    g.fx.text(pc.cx, pc.bb[1] - 20, "Bresche!", (255, 200, 120), gloss="breach!")
             return
         self.blocked_by_tile = None
         self.x += dx

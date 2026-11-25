@@ -10,10 +10,9 @@ import random
 import pygame
 
 from ..settings import TILE, SCREEN_W, SCREEN_H, SEA_LEVEL, DAY_LENGTH
-from ..world import tiles as T
 from ..world.weather import Environment
-from ..world.worldsim import WorldSim, FallingBlock
-from ..gfx.renderer import Renderer, Camera
+from ..gfx.renderer import Camera
+from ..poly.render import PolyRenderer as Renderer
 from ..gfx.fx import FX
 from ..gfx.rig import draw_humanoid
 from ..combat.combat import CombatSystem
@@ -32,64 +31,15 @@ from ..society.ranks import rank as rank_of
 from .player_ctrl import PlayerController
 from ..ui.hud import UI
 from .. import audio
+from .world_ops import WorldOps, ItemDrop, Construction  # noqa: F401
+from ..poly import prefab as PF
 
 
-class ItemDrop:
-    kind = "drop"
-
-    def __init__(self, key, n, x, y):
-        self.key, self.n = key, n
-        self.x, self.y = x, y
-        self.vx = random.uniform(-40, 40)
-        self.vy = -120
-        self.removed = False
-        self.t = 0.0
-        self.uid = id(self)
-
-    def update(self, game, dt):
-        self.t += dt
-        w = game.world
-        p = game.player
-        d = math.hypot(p.cx - self.x, p.cy - self.y)
-        if self.t > 0.4 and d < 70 and not p.dead:
-            self.x += (p.cx - self.x) * min(1, dt * 8)
-            self.y += (p.cy - self.y) * min(1, dt * 8)
-            if d < 16:
-                left = p.inv.add(self.key, self.n)
-                if left < self.n:
-                    game.pickup_text(self.key, self.n - left)
-                    game.emit("pickup", key=self.key, n=self.n - left)
-                self.n = left
-                if left <= 0:
-                    self.removed = True
-            return
-        self.vy = min(500, self.vy + 900 * dt)
-        nx, ny = self.x + self.vx * dt, self.y + self.vy * dt
-        tx, ty = int(nx // TILE), int((ny + 5) // TILE)
-        if w.inside(tx, ty) and (T.SOLID[w.fg[tx, ty]] or T.PLATFORM_T[w.fg[tx, ty]]):
-            self.vy = 0
-            self.vx *= 0.6
-            ny = ty * TILE - 5
-        self.x, self.y = nx, ny
-        if self.t > 300 or self.y > w.pixel_h() + 200:
-            self.removed = True
-
-    def draw(self, surf, ox, oy):
-        from ..ui.common import item_icon
-        bob = math.sin(self.t * 4) * 2
-        item_icon(surf, self.key, (self.x - ox - 12, self.y - oy - 14 + bob, 24, 24))
 
 
-class Construction:
-    def __init__(self, name, jobs):
-        self.name = name
-        self.jobs = jobs      # list of (x, y, fg, bg)
-        self.i = 0
-        self.acc = 0.0
-        self.done = False
 
 
-class Session:
+class Session(WorldOps):
     def __init__(self, app, world, mode="sandbox", seed=1300, spawn=None, player_rank=1, quick_battle=None):
         self.app = app
         self.world = world
@@ -100,7 +50,6 @@ class Session:
         self.camera = Camera()
         self.fx = FX()
         self.combat = CombatSystem(self)
-        self.sim = WorldSim(self)
         self.society = Society(world, seed)
         self.humanoids = []
         self.animals = []
@@ -187,9 +136,10 @@ class Session:
                 inv.add(k, n)
             self.player.equip(weapon="fists")
             return
-        for k, n in (("schwert", 1), ("spitzhacke", 1), ("axt", 1), ("bogen", 1), ("arrow", 40), ("torch", 10),
-                     ("bread", 6), ("planks", 60), ("seeds", 10), ("holzschild", 1), ("verband", 4)):
-            inv.add(k, n)
+        for k, n in (("schwert", 1), ("axt", 1), ("hammer", 1), ("bogen", 1), ("arrow", 30), ("torch", 4),
+                     ("bread", 5), ("seeds", 10), ("holzschild", 1), ("verband", 3), ("spitzhacke", 1)):
+            inv.add(k, n, force=True)
+        inv.belt = ["schwert", "axt", "hammer", "bogen"]
         inv.selected = 0
         self.player.equip(weapon="schwert", shield="holzschild", armor="gambeson")
         self.sync_held()
@@ -328,168 +278,11 @@ class Session:
         return self.hostile_factions(getattr(a, "faction", None), getattr(b, "faction", None), a, b)
 
     # ================================================================== tiles
-    def damage_tile(self, x, y, amount, by=None):
-        w = self.world
-        tid = int(w.fg[x, y])
-        if tid == 0:
-            return False
-        td = T.TILES[tid]
-        dmg = w.damage.get((x, y), 0.0) + amount
-        if self.rng.random() < 0.15:
-            self.fx.debris(x * TILE + 8, y * TILE + 8, td.color, 1)
-        if dmg >= td.hardness:
-            self.break_tile(x, y, drop=True, by=by)
-            return True
-        w.damage[(x, y)] = dmg
-        return False
 
-    def break_tile(self, x, y, drop=True, by=None):
-        w = self.world
-        tid = int(w.fg[x, y])
-        if tid == 0:
-            return
-        td = T.TILES[tid]
-        if tid in (T.LOG.id, T.BIRCH.id):
-            self.fell_tree(x, y, by)
-            return
-        if tid in (T.DOOR.id, T.DOOR_OPEN.id, T.GATE.id, T.GATE_OPEN.id):
-            ys = [y]
-            for d in (-1, 1):
-                yy = y + d
-                while w.inside(x, yy) and w.fg[x, yy] == tid:
-                    ys.append(yy)
-                    yy += d
-            for yy in ys:
-                w.set(x, yy, 0)
-            if drop and td.drop:
-                self.drop_item(td.drop, 1, x * TILE + 8, y * TILE + 8)
-            self.sim.check_support(x, min(ys))
-            return
-        w.set(x, y, 0)
-        w.fires.pop((x, y), None)
-        self.fx.debris(x * TILE + 8, y * TILE + 8, td.color, 6)
-        if drop:
-            if tid in T.RIPE:
-                crop = T.CROP_OF[tid][0]
-                fert = w.fert.get((x, y + 1), 1.0)
-                produce = {"wheat": "wheat", "rye": "rye", "oat": "oats", "flax": "flax", "turnip": "turnip"}[crop]
-                seed = {"wheat": "seeds", "rye": "seeds_rye", "oat": "seeds_oat", "flax": "seeds_flax",
-                        "turnip": "seeds_turnip"}[crop]
-                self.drop_item(produce, max(1, int(round(1 + 2.2 * fert * self.rng.uniform(0.7, 1.2)))),
-                               x * TILE + 8, y * TILE + 8)
-                self.drop_item(seed, self.rng.randint(1, 2), x * TILE + 8, y * TILE + 8)
-                w.fert[(x, y + 1)] = max(0.15, fert - 0.25)   # every harvest tires the soil
-            elif tid == T.CHEST.id:
-                for k, n in w.chests.pop((x, y), {}).items():
-                    if n:
-                        self.drop_item(k, n, x * TILE + 8, y * TILE + 8)
-                self.drop_item("chest", 1, x * TILE + 8, y * TILE + 8)
-            elif td.drop:
-                self.drop_item(td.drop, 1, x * TILE + 8, y * TILE + 8)
-        # grass under a removed plant? leaves the ground. Crops above farmland fall away.
-        if w.inside(x, y - 1) and T.TILES[int(w.fg[x, y - 1])].deco and int(w.fg[x, y - 1]) not in (T.TORCH.id,):
-            self.break_tile(x, y - 1, drop=drop, by=by)
-        self.sim.check_support(x, y)
-        if by is self.player:
-            self.emit("break", tid=tid, x=x, y=y)
 
-    def fell_tree(self, x, y, by=None):
-        w = self.world
-        # walk down to the base, then collect the connected trunk and crown
-        base = y
-        while w.inside(x, base + 1) and w.fg[x, base + 1] in (T.LOG.id, T.BIRCH.id):
-            base += 1
-        stack = [(x, base)]
-        seen = set()
-        logs = 0
-        while stack and len(seen) < 220:
-            cx, cy = stack.pop()
-            if (cx, cy) in seen or not w.inside(cx, cy):
-                continue
-            t = int(w.fg[cx, cy])
-            if t not in (T.LOG.id, T.LEAVES.id, T.PINE.id, T.BIRCH.id):
-                continue
-            if cy > base:
-                continue
-            seen.add((cx, cy))
-            if t in (T.LOG.id, T.BIRCH.id):
-                logs += 1
-            for nx, ny in ((cx, cy - 1), (cx - 1, cy), (cx + 1, cy), (cx, cy + 1)):
-                stack.append((nx, ny))
-        for (cx, cy) in seen:
-            t = int(w.fg[cx, cy])
-            w.set(cx, cy, 0, wake=False)
-            w.fires.pop((cx, cy), None)
-            if self.rng.random() < 0.15:
-                self.fx.debris(cx * TILE + 8, cy * TILE + 8, T.TILES[t].color, 2)
-        if by is not None:
-            self.drop_item("wood", max(1, logs), x * TILE + 8, base * TILE)
-            if self.rng.random() < 0.6:
-                self.drop_item("sapling", 1, x * TILE + 8, base * TILE)
-        self.sfx("tree")
-        if by is self.player:
-            self.emit("chop", n=logs)
 
-    def find_tree(self, tx, radius):
-        w = self.world
-        for d in range(4, radius):
-            for x in (tx + d, tx - d):
-                if not (0 <= x < w.w):
-                    continue
-                g = int(w.surface[x])
-                for y in range(g - 2, g + 2):
-                    if w.inside(x, y) and w.fg[x, y] == T.LOG.id and w.fg[x, y + 1] != T.LOG.id:
-                        return (x, y)
-        return None
 
-    def try_place(self, p, key, tx, ty):
-        w = self.world
-        d = ITEMS[key]
-        if not w.inside(tx, ty) or w.fg[tx, ty] != 0:
-            return False
-        tid = d.place
-        td = T.TILES[tid]
-        if td.solid:
-            for h in self.humanoids + self.animals:
-                if h.x < (tx + 1) * TILE and h.x + h.w > tx * TILE and h.y < (ty + 1) * TILE and h.feet > ty * TILE:
-                    return False
-        neighbours = [(tx + 1, ty), (tx - 1, ty), (tx, ty + 1), (tx, ty - 1)]
-        if not any(w.inside(a, b) and (T.SOLID[w.fg[a, b]] or w.fg[a, b] in (T.LADDER.id, T.PLATFORM.id))
-                   for a, b in neighbours) and not w.bg[tx, ty]:
-            return False
-        below = int(w.fg[tx, ty + 1]) if w.inside(tx, ty + 1) else 0
-        if key.startswith("seeds"):
-            if below != T.FARMLAND.id:
-                self.ui.toast("Seeds need a tilled [Acker|field]: work the ground with a [Hacke|hoe] first.", 3)
-                return False
-        if key == "sapling" and below not in (T.GRASS.id, T.DIRT.id, T.SNOW.id, T.MUD.id):
-            return False
-        if td.deco and not T.SOLID[below] and not T.PLATFORM_T[below] and tid != T.TORCH.id:
-            return False
-        if key == "door":
-            # doors are 3 tall
-            if not all(w.inside(tx, ty - k) and w.fg[tx, ty - k] == 0 for k in (1, 2)):
-                return False
-            for k in range(3):
-                w.set(tx, ty - k, T.DOOR.id)
-        else:
-            w.set(tx, ty, tid)
-        if key == "chest":
-            w.chests[(tx, ty)] = {}
-        p.inv.remove(key, 1)
-        self.sync_held()
-        self.sfx("place")
-        self.emit("place", key=key, x=tx, y=ty)
-        return True
 
-    def open_door(self, x, y):
-        w = self.world
-        ys = [yy for yy in range(y - 3, y + 4) if w.inside(x, yy) and w.fg[x, yy] == T.DOOR.id]
-        for yy in ys:
-            w.set(x, yy, T.DOOR_OPEN.id, wake=False)
-        if ys:
-            self.door_timers[(x, min(ys))] = (3.0, len(ys), T.DOOR.id)
-            self.sfx("door")
 
     def can_open_gate(self, h, x, y):
         s = self.world.settlement_at(x, margin=4)
@@ -499,62 +292,12 @@ class Session:
         owner = self.society.owner.get(si, s["kingdom"])
         return not self.hostile_factions(h.faction, owner, h, None)
 
-    def open_gate(self, x, y):
-        w = self.world
-        cols = [xx for xx in range(x - 2, x + 3) if any(w.inside(xx, yy) and w.fg[xx, yy] == T.GATE.id
-                                                        for yy in range(y - 3, y + 4))]
-        for xx in cols:
-            ys = [yy for yy in range(y - 3, y + 4) if w.inside(xx, yy) and w.fg[xx, yy] == T.GATE.id]
-            for yy in ys:
-                w.set(xx, yy, T.GATE_OPEN.id, wake=False)
-            if ys:
-                self.door_timers[(xx, min(ys))] = (5.0, len(ys), T.GATE.id)
-        self.sfx("gate")
 
-    def update_doors(self, dt):
-        w = self.world
-        for key, (t, n, tid) in list(self.door_timers.items()):
-            t -= dt
-            if t > 0:
-                self.door_timers[key] = (t, n, tid)
-                continue
-            x, y = key
-            occupied = any(h.x < (x + 1) * TILE and h.x + h.w > x * TILE and h.y < (y + n) * TILE and h.feet > y * TILE
-                           for h in self.humanoids + self.animals if not h.dead)
-            if occupied:
-                self.door_timers[key] = (1.0, n, tid)
-                continue
-            open_id = T.DOOR_OPEN.id if tid == T.DOOR.id else T.GATE_OPEN.id
-            for yy in range(y, y + n):
-                if w.inside(x, yy) and w.fg[x, yy] == open_id:
-                    w.set(x, yy, tid, wake=False)
-            del self.door_timers[key]
 
     # ================================================================== fire
-    def ignite(self, x, y):
-        w = self.world
-        if w.inside(x, y) and T.FLAMMABLE[w.fg[x, y]] and (x, y) not in w.fires:
-            w.fires[(x, y)] = 0.0
-            return True
-        return False
 
-    def try_ignite_tile(self, x, y):
-        if self.ignite(x, y):
-            self.say_msg("[Feuer|fire]! The flames catch.")
-            self.emit("ignite", x=x, y=y)
 
-    def fire_near(self, px, py, r):
-        tx, ty = int(px // TILE), int(py // TILE)
-        best, bd = None, r * r
-        for (x, y) in self.world.fires:
-            d = (x - tx) ** 2 + (y - ty) ** 2
-            if d < bd:
-                best, bd = (x, y), d
-        return best
 
-    def extinguish(self, x, y):
-        if self.world.fires.pop((x, y), None) is not None:
-            self.fx.smoke(x * TILE + 8, y * TILE, 3)
 
     def settlement_produce(self, person, key, n):
         m = self.society.markets.get(person.settlement)
@@ -562,9 +305,6 @@ class Session:
             m.stock[key] = m.stock.get(key, 0) + n
 
     # ================================================================== items
-    def drop_item(self, key, n, x, y):
-        if key and n > 0:
-            self.drops.append(ItemDrop(key, n, x, y))
 
     def pickup_text(self, key, n):
         d = ITEMS.get(key)
@@ -583,58 +323,8 @@ class Session:
         self.sfx("eat")
         self.sync_held()
 
-    def trample(self, dt):
-        """Running feet and hooves flatten growing crops — that's why villages build walkways over fields."""
-        w = self.world
-        for e in list(self.humanoids) + list(self.animals):
-            if e.dead or not e.on_ground or e.removed:
-                continue
-            speed = abs(e.mount.vx) if getattr(e, "mount", None) is not None else abs(e.vx)
-            heavy = getattr(e, "species", "") in ("horse", "cow", "pig", "boar", "bear")
-            if speed < (40 if heavy else 105):
-                continue
-            tx, ty = int(e.cx // TILE), int((e.feet - 1) // TILE)
-            if not w.inside(tx, ty):
-                continue
-            t = int(w.fg[tx, ty])
-            if t in T.CROP_OF and T.CROP_OF[t][1] >= 1 and self.rng.random() < dt * 6:
-                crop = T.CROP_OF[t][0]
-                w.set(tx, ty, T.CROPS[crop][0], wake=False)
-                self.fx.debris(tx * TILE + 8, ty * TILE + 10, (150, 170, 80), 3)
-                if e is self.player or getattr(e, "rider", None) is self.player:
-                    if not getattr(self, "_trample_warned", False):
-                        self._trample_warned = True
-                        self.ui.toast("[Zertrampelt|trampled]! The farmers won't thank you. Use the walkways.")
-                    self.player.ehre -= 0 if self.rng.random() < 0.8 else 1
-        p = self.player
-        if p.mount is not None and p.inv.count("pflug") and p.intent.crouch:
-            # ploughing behind the horse
-            tx, ty = int(p.mount.cx // TILE), int(p.mount.feet // TILE)
-            if w.inside(tx, ty) and w.fg[tx, ty] in (T.GRASS.id, T.DIRT.id, T.MUD.id) and w.fg[tx, ty - 1] in (
-                    0, T.TALLGRASS.id, T.FLOWER.id):
-                w.set(tx, ty - 1, 0, wake=False)
-                w.set(tx, ty, T.FARMLAND.id, wake=False)
-                self.fx.dust(tx * TILE + 8, ty * TILE, 3, (112, 78, 52))
 
-    def till(self, tx, ty):
-        w = self.world
-        t = int(w.fg[tx, ty]) if w.inside(tx, ty) else 0
-        if t in (T.GRASS.id, T.DIRT.id, T.MUD.id) and not T.SOLID[w.fg[tx, ty - 1]]:
-            if w.fg[tx, ty - 1] in (T.TALLGRASS.id, T.FLOWER.id):
-                w.set(tx, ty - 1, 0)
-            w.set(tx, ty, T.FARMLAND.id)
-            self.fx.dust(tx * TILE + 8, ty * TILE, 4, (112, 78, 52))
-            return True
-        return False
 
-    def manure(self, tx, ty):
-        w = self.world
-        if w.inside(tx, ty) and w.fg[tx, ty] == T.FARMLAND.id and self.player.inv.remove("mist", 1):
-            w.fert[(tx, ty)] = min(1.5, w.fert.get((tx, ty), 1.0) + 0.5)
-            self.fx.text(tx * TILE, ty * TILE - 20, "Gedüngt", (180, 150, 90), gloss="manured")
-            self.sync_held()
-            return True
-        return False
 
     def bandage(self, h):
         from ..combat import injury as INJ
@@ -865,14 +555,6 @@ class Session:
             self.audio.play(name)
 
     # ================================================================== LOD: people & animals
-    def free_column(self, tx, g, direction=1, limit=40):
-        """Nearest column to tx whose 3 tiles above row g are open (not inside a wall or tower)."""
-        w = self.world
-        for d in range(limit):
-            for x in (tx + d * direction, tx - d * direction):
-                if 0 <= x < w.w and not any(T.SOLID[w.fg[x, g - k]] for k in (1, 2, 3)):
-                    return x
-        return tx
 
     def materialize(self, si):
         s = self.world.settlements[si]
@@ -884,11 +566,9 @@ class Session:
                 continue
             x = (p.bed_x * TILE + 8 if night and p.bed_x else p.home_x) if night else p.work_x
             x += self.rng.uniform(-20, 20)
-            tx = self.free_column(int(x // TILE), p.g)
-            x = tx * TILE + 8
-            g = p.g if T.SOLID[self.world.fg[tx, p.g]] or T.PLATFORM_T[self.world.fg[tx, p.g]] else \
-                self.world.ground_at(tx, max(0, p.g - 3))
-            h = Humanoid(x - 7, g * TILE - 43, p.look, p.kingdom, p.name, p.rank)
+            x = self.free_spot(x, p.g * TILE)
+            gy = self.world.ground_y(x, p.g * TILE - 30, 60)
+            h = Humanoid(x - 7, gy - 43, p.look, p.kingdom, p.name, p.rank)
             h.person = p
             h.hp = p.hp
             wk, sk, ak, hk = p.gear
@@ -1001,7 +681,7 @@ class Session:
             if b == "ocean":
                 for _ in range(3):
                     fy = (SEA_LEVEL + self.rng.randint(4, 30)) * TILE
-                    if w.inside(tx, fy // TILE) and w.liq[tx, fy // TILE]:
+                    if w.water_level(x) is not None and fy < w.surface_y(x) - 8:
                         self.animals.append(Animal(x, fy, "fish"))
             return
         night = self.env.is_night()
@@ -1251,9 +931,10 @@ class Session:
                 self.fx.text(e.cx, 100, "Es regnet Ritter!", (255, 220, 160), gloss="it's raining knights!")
         # world simulation
         ptx = int(p.cx // TILE)
-        self.sim.liquids(ptx)
-        self.sim.fire(dt)
-        self.sim.random_ticks(dt, ptx)
+        self.world_tick(dt)
+        for e in self.humanoids:
+            if e.blocked_by is not None and not e.dead:
+                self.door_contact(e)
         self.update_doors(dt)
         self.update_lod(dt)
         self.society.update_armies(dt, self)
@@ -1317,10 +998,7 @@ class Session:
     def new_day(self):
         self.society.daily(self.env.day, self.world)
         w = self.world
-        for (x, y), f in list(w.fert.items()):
-            above = int(w.fg[x, y - 1]) if w.inside(x, y - 1) else 0
-            rest = 0.22 if above not in T.CROP_OF else 0.03      # Brache: fallow land recovers
-            w.fert[(x, y)] = min(1.2, f + rest)
+        self.grow_crops(1.0)
         p = self.player
         if p.fiefs:
             income = 0
@@ -1338,106 +1016,11 @@ class Session:
         self.society.news.clear()
         self.emit("day", day=self.env.day)
 
-    def lightning_strike(self):
-        w = self.world
-        p = self.player
-        tx = int(p.cx // TILE) + self.rng.randint(-40, 40)
-        if not (0 <= tx < w.w):
-            return
-        g = w.ground_at(tx, 0)
-        self.fx.flash = 1.0
-        self.camera.shake = 4
-        self.sfx("thunder")
-        self.lightning_bolt = (tx * TILE + 8, g * TILE, 0.25)
-        for dy in range(-1, 2):
-            if w.inside(tx, g + dy) and T.FLAMMABLE[w.fg[tx, g + dy]]:
-                self.ignite(tx, g + dy)
-        # trees are struck first
-        for y in range(0, g):
-            if w.fg[tx, y] in (T.LEAVES.id, T.PINE.id, T.LOG.id, T.THATCH.id):
-                self.ignite(tx, y)
-                break
-        for h in self.targets_near(tx * TILE, 30):
-            h.take_hit(self, None, 40, "blunt", 50, ("unblockable",), source_x=tx * TILE)
 
-    def update_edges(self, dt):
-        """The abyss crumbles: chunks of the brink break away when you're near (story world)."""
-        w = self.world
-        p = self.player
-        if p.cx / TILE > w.abyss_w + 260:
-            return
-        self.crumble_t -= dt
-        if self.crumble_t > 0:
-            return
-        self.crumble_t = self.rng.uniform(2, 6)
-        x = w.abyss_w
-        while x < w.w and not w.fg[x].any():
-            x += 1
-        col = w.fg[x]
-        ys = [y for y in range(w.h) if col[y]]
-        if not ys:
-            return
-        for y in ys[: self.rng.randint(3, 9)]:
-            tid = int(w.fg[x, y])
-            if tid != T.BEDROCK.id:
-                w.set(x, y, 0)
-                self.spawn_falling(x, y, tid)
-        self.camera.shake = max(self.camera.shake, 1.5)
 
-    def spawn_falling(self, x, y, tid):
-        if len(self.falling) < 300:
-            self.falling.append(FallingBlock(x, y, tid))
 
     # ================================================================== construction
-    def queue_blueprint(self, bp, tx, g):
-        """Run the builder on the real world, diff it, restore, then build it tile by tile."""
-        w = self.world
-        x0, x1 = tx - 6, tx + bp.width + 8
-        y0, y1 = max(0, g - 46), min(w.h, g + 7)
-        before_fg = w.fg[x0:x1, y0:y1].copy()
-        before_bg = w.bg[x0:x1, y0:y1].copy()
-        before_liq = w.liq[x0:x1, y0:y1].copy()
-        chests = dict(w.chests)
-        bp.build(w, tx, g, self.rng)
-        after_fg = w.fg[x0:x1, y0:y1].copy()
-        after_bg = w.bg[x0:x1, y0:y1].copy()
-        w.fg[x0:x1, y0:y1] = before_fg
-        w.bg[x0:x1, y0:y1] = before_bg
-        w.liq[x0:x1, y0:y1] = before_liq
-        new_chests = {k: v for k, v in w.chests.items() if k not in chests}
-        w.chests = chests
-        jobs = []
-        import numpy as np
-        for lx, ly in np.argwhere((after_fg != before_fg) | (after_bg != before_bg)):
-            jobs.append((x0 + int(lx), y0 + int(ly), int(after_fg[lx, ly]), int(after_bg[lx, ly])))
-        # foundations first, then bottom-up
-        jobs.sort(key=lambda j: (-j[1], j[0]))
-        c = Construction(bp.de, jobs)
-        c.chests = new_chests
-        self.constructions.append(c)
-        return len(jobs)
 
-    def update_constructions(self, dt):
-        w = self.world
-        for c in self.constructions:
-            c.acc += dt * 26
-            while c.acc >= 1 and c.i < len(c.jobs):
-                c.acc -= 1
-                x, y, f, b = c.jobs[c.i]
-                c.i += 1
-                if w.fg[x, y] != f:
-                    w.set(x, y, f)
-                    if f and self.rng.random() < 0.3:
-                        self.fx.dust(x * TILE + 8, y * TILE + 8, 2, (200, 180, 140))
-                if w.bg[x, y] != b:
-                    w.set_bg(x, y, b)
-            if c.i >= len(c.jobs) and not c.done:
-                c.done = True
-                w.chests.update(c.chests)
-                self.ui.toast(f"[Fertig|finished]: {c.name}")
-                self.player.stats["built"] += 1
-                self.emit("built", name=c.name)
-        self.constructions = [c for c in self.constructions if not c.done]
 
     # ================================================================== your troops
     UNIT_FOR_WEAPON = {"speer": "speer", "spiess": "spiess", "hellebarde": "hellebarde", "bogen": "bogen",
@@ -1555,103 +1138,137 @@ class Session:
             if not e.dead and e.side == "player" and abs(e.x - p.cx) < e.w / 2 + 30:
                 e.toggle(self)
                 return
-        # tiles around the player
-        tx0, ty0 = int(p.cx // TILE), int(p.cy // TILE)
-        cands = []
-        for dx in range(-2, 3):
-            for dy in range(-2, 3):
-                x, y = tx0 + dx, ty0 + dy
-                if w.inside(x, y) and w.fg[x, y]:
-                    cands.append((abs(dx) + abs(dy), x, y, int(w.fg[x, y])))
-        cands.sort()
-        for _, x, y, tid in cands:
-            if tid == T.DOOR.id:
-                self.open_door(x, y)
+        # at a workbench: work there (whatever you carry goes onto the bench)
+        for d in w.near("decor_chunks", p.cx - 60, p.cx + 60):
+            if d.kind == "workbench" and not d.gone and abs(d.x - p.cx) < 34 and abs(d.y - p.feet) < 30:
+                self.ui.open_lab(d)
                 return
-            if tid == T.DOOR_OPEN.id:
-                for k in list(self.door_timers):
-                    if k[0] == x:
-                        self.door_timers[k] = (0.0, *self.door_timers[k][1:])
-                return
-            if tid == T.GATE.id:
-                if self.can_open_gate(p, x, y):
-                    self.open_gate(x, y)
-                else:
+        # what you carry: set it down in front of you
+        if getattr(p, "carrying", None) is not None:
+            self.put_down(p)
+            return
+        # loose things: pick them up (into the bag, or into your arms)
+        mx, my = self.ctrl.mouse_world
+        near_mouse = math.hypot(mx - p.cx, my - p.cy) < 90
+        best, bd = None, 44
+        for o in w.objects:
+            if o.removed or o.anchored and o.shape_key != "door" or o.crown is not None:
+                continue
+            for qx, qy in ((p.cx, p.cy + 8),) + (((mx, my),) if near_mouse else ()):
+                d = math.hypot(o.x - qx, o.y - qy) - o.radius * 0.6
+                if d < bd:
+                    best, bd = o, d
+        if best is not None:
+            if best.anchored and best.shape_key == "door":
+                self.toggle_object_door(best)
+            else:
+                self.pick_up(p, best)
+            return
+        # doors
+        pc = self.door_near(p.cx + p.facing * 10, p.feet - 20, 34)
+        if pc is not None:
+            if pc.open:
+                PF.toggle_door(w, pc, False)
+                self.door_timers.pop(pc.id, None)
+            else:
+                b_ = PF.building(w, pc.bld)
+                if b_ is not None and b_.kind in ("wall", "gatehouse") and not self.can_open_gate(p, int(pc.cx // TILE), 0):
                     self.ui.toast("The [Tor|gate] is barred against you.")
-                return
-            if tid == T.WINCH.id:
-                from ..combat import siege as SIEGE
-                gh = min(w.gatehouses, key=lambda g_: abs(g_["winch"][0] - x), default=None)
-                if gh is not None:
-                    owner = SIEGE.gatehouse_owner(self, gh)
-                    if owner is not None and self.hostile_factions("player", owner, p, None):
-                        self.ui.toast("Not your castle! The guards would cut you down at the [Winde|winch].")
-                        return
-                    gh["auto"] = False
-                    SIEGE.set_defenses(self, gh, not gh.get("closed"))
-                    self.ui.toast("[Zugbrücke hoch|drawbridge up], [Fallgatter runter|portcullis down]!"
-                                  if gh["closed"] else "[Zugbrücke runter|drawbridge down], [Fallgatter hoch|"
-                                                       "portcullis up]!")
-                return
-            if tid == T.PECHNASE.id or (tid in (T.BRICK.id,) and any(
-                    abs(g_["pechnase"][0] - x) <= 1 and abs(g_["pechnase"][1] - y) <= 2 for g_ in w.gatehouses)):
-                from ..combat import siege as SIEGE
-                gh = min(w.gatehouses, key=lambda g_: abs(g_["pechnase"][0] - x) + abs(g_["pechnase"][1] - y))
-                if p.inv.remove("pech", 1):
-                    SIEGE.pour_pitch(self, gh, by=p)
-                    self.sync_held()
                 else:
-                    self.ui.toast("You need [Pech|pitch] to pour. (Ofen: 3 Holz + 1 Kohle)")
-                return
-            if tid == T.SIGN.id:
-                txt = w.signs.get((x, y), "…")
-                self.ui.toast("[Wegweiser|signpost]: " + txt.replace("\n", "   "), 7)
-                return
-            if tid == T.CHEST.id:
-                c = w.chests.get((x, y), {})
-                got = [(k, n) for k, n in c.items() if n]
-                if not got:
-                    self.ui.toast("The [Truhe|chest] is [leer|empty].")
+                    self.open_door_piece(pc, t=6.0)
+            return
+        # fittings and furniture
+        best, bd = None, 34
+        for d in w.near("decor_chunks", p.cx - 80, p.cx + 80):
+            if d.gone or d.kind in ("bush", "flowers", "fern", "reeds", "seaweed", "shell", "heather", "vine",
+                                    "torchpost", "chain", "gablehead", "sails", "flag", "banner", "cross", "bell"):
+                continue
+            dx = abs(d.x - p.cx) - (d.w / 2 if d.kind == "plot" else 0)
+            if dx < bd and d.y - d.h - 30 < p.feet < d.y + 20:
+                best, bd = d, dx
+        if best is not None and self.use_decor(best):
+            return
+
+    def use_decor(self, d):
+        p = self.player
+        w = self.world
+        k = d.kind
+        if k == "sign":
+            self.ui.toast("[Wegweiser|signpost]: " + d.data.get("text", "…").replace("\n", "   "), 7)
+        elif k == "chest":
+            c = d.data.setdefault("items", {})
+            got = [(kk, n) for kk, n in c.items() if n]
+            if d.data.get("fresh", True) and not got and not d.data.get("sunken"):
+                d.data["fresh"] = False
+                c.update(self.rng.choice([{"bread": 2}, {"silver_coin": self.rng.randint(3, 15)}, {"cloth": 1},
+                                          {"verband": 1}, {}]))
+                got = [(kk, n) for kk, n in c.items() if n]
+            if not got:
+                self.ui.toast("The [Truhe|chest] is [leer|empty].")
+            else:
+                s = w.settlement_at(int(d.x // TILE), margin=2)
+                for kk, n in got:
+                    p.inv.add(kk, n)
+                    self.pickup_text(kk, n)
+                d.data["items"] = {}
+                if s is not None and self.rng.random() < 0.5:
+                    witnesses = [h for h in self.humanoids if getattr(h, "person", None) and not h.dead and
+                                 abs(h.cx - p.cx) < 200 and h is not p]
+                    if witnesses:
+                        self.npc_say(witnesses[0], "thief")
+                        p.ehre -= 3
+                        self.ui.toast("[Dieb|thief]! −3 [Ehre|honour]")
+        elif k == "bed":
+            self.sleep()
+        elif k == "plot":
+            if not self.harvest(p.cx, by=p):
+                pl, st = self.plot_at(p.cx)
+                if st is not None and st[0] is not None:
+                    self.ui.toast(f"The {st[0]} is not ripe yet ({int(st[1] * 100)}%).", 2)
                 else:
-                    s = self.world.settlement_at(x, margin=2)
-                    for k, n in got:
-                        p.inv.add(k, n)
-                        self.pickup_text(k, n)
-                    w.chests[(x, y)] = {}
-                    if s is not None and self.rng.random() < 0.5:
-                        witnesses = [h for h in self.humanoids if getattr(h, "person", None) and not h.dead and
-                                     abs(h.cx - p.cx) < 200 and h is not p]
-                        if witnesses:
-                            self.npc_say(witnesses[0], "thief")
-                            p.ehre -= 3
-                            self.ui.toast("[Dieb|thief]! −3 [Ehre|honour]")
-                return
-            if tid == T.BED.id:
-                self.sleep()
-                return
-            if tid == T.WHEAT4.id:
-                self.break_tile(x, y, drop=True, by=p)
-                if w.fg[x, y + 1] == T.FARMLAND.id:
-                    w.set(x, y, T.WHEAT1.id)
-                return
-            if tid == T.ALTAR.id:
-                if getattr(p, "prayed_day", -1) != self.env.day:
-                    p.prayed_day = self.env.day
-                    p.ehre += 1
-                    self.ui.toast("You pray. [Amen|amen]. +1 [Ehre|honour]")
-                else:
-                    self.ui.toast("[Gott|God] has heard you today already.")
-                return
-            if tid == T.WELL.id:
-                p.hunger = min(100, p.hunger + 3)
-                self.ui.toast("Fresh [Wasser|water] from the [Brunnen|well].")
-                return
-            if tid in (T.WORKBENCH.id, T.ANVIL.id, T.FORGE.id, T.OVEN.id, T.LOOM.id, T.TABLE.id, T.FIRE_PIT.id):
-                self.ui.open("inventory")
-                return
-            if tid == T.THRONE.id:
-                self.ui.toast("The [Thron|throne]. Sitting on it uninvited would be… unwise.")
-                return
+                    return False
+        elif k == "altar":
+            if getattr(p, "prayed_day", -1) != self.env.day:
+                p.prayed_day = self.env.day
+                p.ehre += 1
+                self.ui.toast("You pray. [Amen|amen]. +1 [Ehre|honour]")
+            else:
+                self.ui.toast("[Gott|God] has heard you today already.")
+        elif k in ("well", "bucket"):
+            p.hunger = min(100, p.hunger + 3)
+            self.ui.toast("Fresh [Wasser|water] from the [Brunnen|well].")
+        elif k == "workbench":
+            self.ui.open_lab(d)
+        elif k in ("anvil", "forge", "oven", "loom", "table", "hearth", "barrel"):
+            self.ui.open("inventory")
+        elif k == "throne":
+            self.ui.toast("The [Thron|throne]. Sitting on it uninvited would be… unwise.")
+        elif k == "winch":
+            from ..combat import siege as SIEGE
+            gh = SIEGE.gatehouse_near(self, d.x)
+            if gh is None:
+                return False
+            owner = SIEGE.gatehouse_owner(self, gh)
+            if owner is not None and self.hostile_factions("player", owner, p, None):
+                self.ui.toast("Not your castle! The guards would cut you down at the [Winde|winch].")
+                return True
+            gh.auto = False
+            SIEGE.set_defenses(self, gh, not gh.closed)
+            self.ui.toast("[Zugbrücke hoch|drawbridge up], [Fallgatter runter|portcullis down]!" if gh.closed else
+                          "[Zugbrücke runter|drawbridge down], [Fallgatter hoch|portcullis up]!")
+        elif k == "pechnase":
+            from ..combat import siege as SIEGE
+            gh = SIEGE.gatehouse_near(self, d.x)
+            if gh is None:
+                return False
+            if p.inv.remove("pech", 1):
+                SIEGE.pour_pitch(self, gh, by=p)
+                self.sync_held()
+            else:
+                self.ui.toast("You need [Pech|pitch] to pour. (Ofen: 3 Holz + 1 Kohle)")
+        else:
+            return False
+        return True
 
     def sleep(self):
         if not (self.env.is_night() or self.env.hour() > 19):
@@ -1710,18 +1327,24 @@ class Session:
         cam = self.camera
         ox, oy = cam.offset()
         env = self.env
-        r.set_season(env.season())
+        SW, SH = surf.get_size()
+        r.set_season(env.season_name()[0])
+        r.time = env.time
+        r.storm = env.rain() if env.current()[0] in ("sturm", "regen") else 0.0
+        sun = env.sun_height()
+        night = max(0.0, min(1.0, -sun * 3 + 0.3)) if sun < 0.1 else 0.0
         r.draw_sky(surf, env, cam)
         if getattr(self, "ambient", None) is not None:
             self.ambient.draw(surf, ox, oy, env)
         r.draw_parallax(surf, env, cam)
         r.draw_terrain(surf, cam)
-        self.draw_fires_back(surf, ox, oy)
-        for c in self.constructions:
-            self.draw_scaffold(surf, c, ox, oy)
-        sw = surf.get_width()
+        r.draw_buildings(surf, cam)
+        r.draw_gatehouses(surf, cam)
+        r.draw_decor(surf, cam, env.time, env.wind, night)
+        r.draw_trees(surf, cam, env.time, env.wind)
+        r.draw_objects(surf, cam)
         for x, y, proto, f, t in self.corpses:
-            if -60 < x - ox < sw + 60:
+            if -60 < x - ox < SW + 60:
                 pygame.draw.ellipse(surf, (60, 40, 34), (x - ox - 12, y - oy - 5, 24, 5))
                 pygame.draw.line(surf, proto.look["tunic"], (x - ox - 10, y - oy - 3), (x - ox + 8, y - oy - 4), 4)
         for b in self.boats:
@@ -1733,26 +1356,36 @@ class Session:
         for a in self.animals:
             a.draw(surf, ox, oy)
         for h in sorted(self.humanoids, key=lambda h: (h is self.player, not h.dead)):
-            sx, sy = h.cx - ox, h.feet - oy + h.step_smooth
-            if -60 < sx < sw + 60 and -80 < sy < surf.get_height() + 80:
+            sx, sy = h.cx - ox, h.feet - oy
+            if -60 < sx < SW + 60 and -80 < sy < SH + 80:
                 draw_humanoid(surf, h, sx, sy)
+                if getattr(h, "carrying", None) is not None:
+                    self.draw_carried(surf, h, ox, oy)
+        r.draw_grass(surf, cam, env.time, env.wind)
         for d in self.drops:
             d.draw(surf, ox, oy)
-        for fb in self.falling:
-            fb.draw(surf, ox, oy)
         for pr in self.projectiles:
             pr.draw(surf, ox, oy)
-        r.storm = env.rain() if env.current()[0] in ("sturm", "regen") else 0.0
-        r.draw_liquids(surf, cam, env.time)
-        self.draw_fires_front(surf, ox, oy)
+        self.ctrl.draw_world(surf, ox, oy)
+        r.draw_water(surf, cam, env.time)
         self.fx.draw(surf, ox, oy, self.ui.small, self.ui.tiny)
-        lights = []
+        lights = r.lights_in_view(cam, SW, SH, night)
+        lights.append((self.player.cx, self.player.cy, 0.12))   # your eyes adjust to the dark a little
         for h in self.humanoids:
             ls = h.light_strength()
             if ls > 0 and abs(h.cx - self.player.cx) < 1400:
                 lights.append((h.cx, h.y + 8, ls))
-        for (x, y) in list(self.world.fires.keys())[:200]:
-            lights.append((x * TILE + 8, y * TILE + 8, 0.9))
+        w = self.world
+        for pid in list(getattr(w, "burning", ()))[:60]:
+            pc = w.pieces.get(pid)
+            if pc is not None:
+                lights.append((pc.cx, pc.cy, 0.9))
+        for t in w.near("tree_chunks", ox - 200, ox + SW + 200):
+            if t.burn > 0 and t.state == "stand":
+                lights.append((t.x, t.y - t.h * 0.6, 1.0))
+        for o in w.objects:
+            if o.burn > 0:
+                lights.append((o.x, o.y, 0.7))
         for pr in self.projectiles:
             if pr.fire:
                 lights.append((pr.x, pr.y, 0.6))
@@ -1762,27 +1395,13 @@ class Session:
         self.draw_weather(surf, ox, oy)
         self.ui.draw_world_overlays(surf, ox, oy)
 
-    def draw_scaffold(self, surf, c, ox, oy):
-        for x, y, f, b in c.jobs[c.i:c.i + 400:3]:
-            if f:
-                pygame.draw.rect(surf, (210, 190, 140), (x * TILE - ox, y * TILE - oy, TILE, TILE), 1)
-
-    def draw_fires_back(self, surf, ox, oy):
-        pass
-
-    def draw_fires_front(self, surf, ox, oy):
-        t = self.env.time
-        for (x, y), age in self.world.fires.items():
-            px, py = x * TILE - ox, y * TILE - oy
-            if -20 < px < surf.get_width() + 20 and -40 < py < surf.get_height() + 20:
-                h = 10 + math.sin(t * 13 + x * 3) * 4
-                pygame.draw.polygon(surf, (240, 110, 30), [(px, py + 16), (px + 8, py + 16 - h - 6), (px + 16, py + 16)])
-                pygame.draw.polygon(surf, (255, 210, 90), [(px + 4, py + 16), (px + 8, py + 10 - h * 0.4),
-                                                           (px + 12, py + 16)])
-                if self.rng.random() < 0.05:
-                    self.fx.smoke(x * TILE + 8, y * TILE - 4)
-                if self.rng.random() < 0.06:
-                    self.fx.fire(x * TILE + 8, y * TILE + 8, 1)
+    def draw_carried(self, surf, h, ox, oy):
+        """Things too big for the bag are held in both arms in front of the chest."""
+        from ..poly.render import draw_object
+        o = h.carrying
+        o.pos = (h.cx + h.facing * 8, h.y + 20)
+        o.angle = 0.0 if o.kind == "log" or (max(abs(x) for x, _ in o.pts) > max(abs(y) for _, y in o.pts)) else 0.0
+        draw_object(surf, o, ox, oy, self.renderer)
 
     def draw_weather(self, surf, ox, oy):
         env = self.env

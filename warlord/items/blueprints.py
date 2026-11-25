@@ -1,9 +1,9 @@
-"""Bauplan — blueprints. Place a ghost, pay the materials, and watch it rise tile by tile."""
+"""Bauplan — blueprints. Place a ghost, pay the materials, and watch it rise piece by piece."""
 from dataclasses import dataclass
 from typing import Callable
 
-from ..world import structures as S
-from ..world import tiles as T
+from ..poly import prefab as S
+from ..poly.prefab import Decor
 
 
 @dataclass
@@ -33,25 +33,25 @@ def _stonehouse(w, x, g, rng):
 
 def _smithy(w, x, g, rng):
     h = S.house(w, x, g, width=9, height=4, style="peasant", door_side=1, rng=rng, kind="smithy")
-    S._put(w, h["x0"] + 3, g - 1, T.ANVIL.id)
-    S._put(w, h["x0"] + 4, g - 1, T.FORGE.id)
+    from ..poly.gen import smithy_fittings
+    smithy_fittings(w, h)
 
 
 def _palisade(w, x, g, rng):
-    for i in range(6):
-        S.palisade(w, x + i, g)
+    for i in range(0, 6, 2):
+        S.palisade(w, x + i, g, rng=rng)
 
 
 def _wall(w, x, g, rng):
-    S.wall_tower(w, x, g, height=8, thick=2, gate=False)
+    S.wall_tower(w, x, g, height=8, thick=2, gate=False, rng=rng)
 
 
 def _gate(w, x, g, rng):
-    S.wall_tower(w, x, g, height=8, thick=2, gate=True)
+    S.wall_tower(w, x, g, height=8, thick=2, gate=True, rng=rng)
 
 
 def _tower(w, x, g, rng):
-    S.tower(w, x, g, width=6, height=14)
+    S.tower(w, x, g, width=6, height=14, rng=rng)
 
 
 def _church(w, x, g, rng):
@@ -59,11 +59,11 @@ def _church(w, x, g, rng):
 
 
 def _mill(w, x, g, rng):
-    S.windmill(w, x, g)
+    S.windmill(w, x, g, rng=rng)
 
 
 def _well(w, x, g, rng):
-    S.well(w, x, g)
+    S.well(w, x, g, rng=rng)
 
 
 def _field(w, x, g, rng):
@@ -71,7 +71,7 @@ def _field(w, x, g, rng):
 
 
 def _hall(w, x, g, rng):
-    S.great_hall(w, x, g, width=17)
+    S.great_hall(w, x, g, width=17, rng=rng)
 
 
 def _castle(w, x, g, rng):

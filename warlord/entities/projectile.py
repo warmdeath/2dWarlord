@@ -4,7 +4,11 @@ import math
 import pygame
 
 from ..settings import TILE
-from ..world import tiles as T
+import pymunk
+
+from ..poly.world import CAT_STRUCT, CAT_OBJECT, CAT_TERRAIN
+
+Q_HIT = pymunk.ShapeFilter(mask=CAT_STRUCT | CAT_OBJECT | CAT_TERRAIN)
 
 
 class Projectile:
@@ -41,32 +45,44 @@ class Projectile:
         sdt = dt / steps
         w = game.world
         for _ in range(steps):
+            px, py = self.x, self.y
             self.x += self.vx * sdt
             self.y += self.vy * sdt
-            tx, ty = int(self.x // TILE), int(self.y // TILE)
-            if w.inside(tx, ty):
-                if T.SOLID[w.fg[tx, ty]] and w.fg[tx, ty] == T.PORTCULLIS.id and self.kind in ("arrow", "bolt",
-                                                                                             "fire_arrow"):
-                    pass   # arrows fly through the iron grate
-                elif T.SOLID[w.fg[tx, ty]] and self.kind in ("stone", "ball"):
+            hit = None
+            q = w.space.segment_query_first((px, py), (self.x, self.y), 0.5, Q_HIT)
+            if q is not None and not q.shape.sensor:
+                pc = getattr(q.shape, "owner", None)
+                if not (getattr(pc, "role", "") == "portcullis" and self.kind in ("arrow", "bolt", "fire_arrow")):
+                    hit = (q.point.x, q.point.y, pc, q.shape)
+            if hit is None and w.terrain_solid(self.x, self.y):
+                hit = (self.x, self.y, None, None)
+            if hit is not None:
+                hx, hy, pc, shape = hit
+                self.x, self.y = hx, hy
+                if self.kind in ("stone", "ball"):
                     from ..combat import siege
-                    siege.impact(game, self.x, self.y, self.kind)
+                    if shape is not None and shape.body.body_type == pymunk.Body.DYNAMIC:
+                        shape.body.apply_impulse_at_world_point((self.vx * 6, self.vy * 6), (hx, hy))
+                    siege.impact(game, hx, hy, self.kind)
                     self.removed = True
                     return
-                elif T.SOLID[w.fg[tx, ty]]:
-                    self.stuck = True
-                    if self.fire and T.FLAMMABLE[w.fg[tx, ty]]:
-                        game.ignite(tx, ty)
-                    game.fx.dust(self.x, self.y, 2)
+                self.stuck = True
+                if self.fire:
+                    game.ignite_at(hx + math.cos(self.angle) * 4, hy + math.sin(self.angle) * 4, 6)
+                game.fx.dust(self.x, self.y, 2)
+                if shape is not None and shape.body.body_type == pymunk.Body.DYNAMIC:
+                    shape.body.apply_impulse_at_world_point((self.vx * 0.3, self.vy * 0.3), (hx, hy))
+                return
+            wl = w.water_level(self.x)
+            if wl is not None and self.y > wl:
+                wr = w.water_at(self.x)
+                if wr is not None and wr.lava:
+                    self.removed = True
                     return
-                if w.liq[tx, ty] > 3:
-                    if w.lava[tx, ty]:
-                        self.removed = True
-                        return
-                    self.vx *= 0.9
-                    self.vy *= 0.9
-                    self.fire = False
-            elif ty >= w.h + 30:
+                self.vx *= 0.9
+                self.vy *= 0.9
+                self.fire = False
+            if self.y >= w.pixel_h() + 400:
                 self.removed = True
                 return
             if game.combat.projectile_hit(self):

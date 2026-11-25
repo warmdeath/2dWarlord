@@ -11,7 +11,6 @@ import math
 import random
 
 from ..settings import TILE, DAY_LENGTH
-from ..world import tiles as T
 from ..society import dialogue as D
 
 
@@ -24,22 +23,14 @@ def walk_to(h, game, tx_px, run=False, tol=6):
     it.mx = 1 if d > 0 else -1
     it.run = run
     w = game.world
-    # open doors in the way
-    fx = int((h.cx + it.mx * (h.w / 2 + 4)) // TILE)
-    for ty in (int((h.feet - 8) // TILE), int((h.feet - 24) // TILE)):
-        if w.inside(fx, ty) and w.fg[fx, ty] == T.DOOR.id:
-            game.open_door(fx, ty)
-        if w.inside(fx, ty) and w.fg[fx, ty] == T.GATE.id and game.can_open_gate(h, fx, ty):
-            game.open_gate(fx, ty)
-    if h.blocked and h.on_ground:
-        # only jump over obstacles we can actually clear (1-2 tiles with headroom), never up a wall
-        feet_row = int((h.feet - 1) // TILE)
+    if h.blocked and h.on_ground and not (h.blocked_by is not None and getattr(h.blocked_by, "role", "") == "door"):
+        # only jump over what we can clear (a log, a low step), never at a wall
+        fx = h.cx + it.mx * (h.w / 2 + 5)
         height = 0
-        while height < 4 and w.inside(fx, feet_row - height) and T.SOLID[w.fg[fx, feet_row - height]]:
-            height += 1
-        headroom = all(not (w.inside(fx, feet_row - k) and T.SOLID[w.fg[fx, feet_row - k]])
-                       for k in range(height, height + 3))
-        if 0 < height <= 2 and headroom:
+        for k, dy in enumerate((6, 20, 34, 50)):
+            if w.solid_point(fx, h.feet - dy):
+                height = dy
+        if 0 < height <= 34 and not w.solid_point(fx, h.feet - height - 46):
             it.jump = True
             it.jump_held = True
     if h.in_water > 0.3:
@@ -337,21 +328,22 @@ class LifeBrain(Brain):
                     game.set_brain(h, "flee", threat=threat)
                     game.npc_say(h, "afraid")
                 return
-            fire = game.fire_near(h.cx, h.cy, 9)
+            fire = game.fire_near(h.cx, h.cy, 14)
             if fire is not None and not p.noble:
                 self.task = ("fire", fire)
         # --- fire fighting
         if self.task and self.task[0] == "fire":
-            fx, fy = self.task[1]
-            if (fx, fy) not in game.world.fires:
+            pos = game.fire_pos(self.task[1])
+            if pos is None or not game.is_burning(self.task[1]):
                 self.task = None
             else:
-                if walk_to(h, game, fx * TILE + 8, run=True, tol=20):
+                fx = pos[0]
+                if walk_to(h, game, fx, run=True, tol=24):
                     h.action = {"kind": "work", "style": "stir", "speed": 4}
                     self.work_t += dt
                     if self.work_t > 1.2:
                         self.work_t = 0
-                        game.extinguish(fx, fy)
+                        game.extinguish(self.task[1])
                 if self.say_cd <= 0:
                     self.say_cd = 6
                     game.npc_say(h, "fire")
@@ -422,40 +414,41 @@ class LifeBrain(Brain):
                 self.work_t += dt
                 if self.work_t > 2.0:
                     self.work_t = 0
-                    g = w.ground_at(tx, max(0, p.g - 6))
-                    y = g - 1
-                    if w.inside(tx, y):
-                        t = int(w.fg[tx, y])
-                        fert = w.fert.get((tx, g), 1.0)
-                        if t in T.RIPE:
-                            crop = T.CROP_OF[t][0]
-                            fert = max(0.15, fert - 0.25)
-                            w.fert[(tx, g)] = fert
-                            # Dreifelderwirtschaft: tired soil is left fallow (Brache) to recover
-                            w.set(tx, y, T.CROPS[crop][0] if fert >= 0.45 else 0)
-                            game.settlement_produce(p, {"oat": "oats"}.get(crop, crop), 2)
-                            game.fx.debris(tx * TILE + 8, y * TILE + 8, (222, 190, 84), 4)
-                        elif t == 0 and w.fg[tx, g] == T.FARMLAND.id and fert >= 0.7:
-                            crop = getattr(p, "crop", None) or "wheat"
-                            w.set(tx, y, T.CROPS[crop][0])
+                    got = game.farm_work(h, tx * TILE + 8)
+                    if got:
+                        game.settlement_produce(p, got, 2)
                     self.task = ("field", random.randint(fx0, fx1))
             return
         if job == "woodcutter":
-            if self.task is None or self.task[0] != "tree":
-                tree = game.find_tree(p.work_x // TILE, 60)
+            if self.task is None or self.task[0] not in ("tree", "haul"):
+                tree = game.find_tree(int(p.work_x // TILE), 70)
                 self.task = ("tree", tree) if tree else ("idle", None)
             if self.task[0] == "tree":
-                tx, ty = self.task[1]
-                if w.fg[tx, ty] != T.LOG.id:
-                    self.task = None
+                t = self.task[1]
+                if t.state != "stand":
+                    near = [o for o in w.objects if o.kind == "log" and abs(o.x - t.x) < t.h]
+                    self.task = ("haul", near[0]) if near else None
                     return
-                if walk_to(h, game, tx * TILE - 14 if h.cx < tx * TILE else tx * TILE + 30, tol=8):
-                    h.facing = 1 if tx * TILE + 8 > h.cx else -1
+                side = -1 if h.cx < t.x else 1
+                if walk_to(h, game, t.x + side * (t.tw / 2 + 14), tol=8):
+                    h.facing = -side
                     h.action = {"kind": "work", "style": "chop", "speed": 1.6}
                     self.work_t += dt
-                    if self.work_t > 3.0:
+                    if self.work_t > 1.0:
                         self.work_t = 0
-                        game.fell_tree(tx, ty, by=h)
+                        game.chop_tree(t, 14, by=h)
+            elif self.task[0] == "haul":
+                o = self.task[1]
+                if o.removed or o.crown is not None:
+                    if o.removed:
+                        self.task = None
+                    return
+                if walk_to(h, game, o.x, tol=30):
+                    h.action = {"kind": "work", "style": "chop", "speed": 1.6}
+                    self.work_t += dt
+                    if self.work_t > 4.0:
+                        self.work_t = 0
+                        o.remove()
                         game.settlement_produce(p, "wood", 4)
                         self.task = None
             else:
@@ -568,18 +561,17 @@ class ClimbBrain(Brain):
         if tgt is None or self.t > 18:
             game.set_brain(h, "combat")
             return
-        lx, top, wx = tgt
-        feet_row = int((h.feet - 1) // TILE)
+        lx, top, wx = tgt          # pixels: ladder x, wall top y, wall x
         side = 1 if wx > lx else -1
-        if feet_row > top:
-            if abs(h.cx - (lx * TILE + 8)) > 4 and not h.climbing:
-                walk_to(h, game, lx * TILE + 8, tol=3)
+        if h.feet > top + 4:
+            if abs(h.cx - lx) > 5 and not h.climbing:
+                walk_to(h, game, lx, tol=3)
             else:
                 it.up = True
         else:
             it.mx = side
             it.up = True
-            if h.on_ground and abs(h.cx - (lx * TILE + 8)) > 14:
+            if h.on_ground and abs(h.cx - lx) > 18:
                 game.set_brain(h, "combat")
 
 

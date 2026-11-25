@@ -16,7 +16,6 @@ import math
 import pygame
 
 from ..settings import TILE, SCREEN_W, GOLD, DAY_LENGTH, SEA_LEVEL
-from ..world import tiles as T
 from ..entities.humanoid import Humanoid
 from ..combat.formation import Haufen
 from ..society.names import make_look
@@ -191,8 +190,8 @@ class Story:
         w = self.s.world
         tx = int(x // TILE)
         st = w.settlement_at(tx)
-        start = st["g"] - 2 if st else max(0, int(w.surface[tx]) - 30)
-        return w.ground_at(tx, start) * TILE
+        start = st["g"] * TILE - 40 if st else w.surface_y(x) - 60
+        return w.ground_y(x, start, 300)
 
     def spawn_npc(self, tag, name, x, rank=1, job="farmer", gear=("fists", "", "kleidung", ""), faction=None,
                   brain="idle", lines=None, look=None, female=False, kingdom="randmark"):
@@ -243,11 +242,9 @@ class Story:
         er = self.settlement("Erlenbach")
         w = s.world
         for b in er["buildings"]:
-            if b["kind"] == "field":
-                for x in range(b["x0"], b["x1"] + 1):
-                    if w.fg[x, b["g"]] == T.FARMLAND.id:
-                        w.fg[x, b["g"] - 1] = T.WHEAT4.id
-        s.renderer.terrain.clear()
+            if b["kind"] == "field" and b.get("plot") is not None:
+                for st in w.plots[b["plot"]].strips:
+                    st[0], st[1], st[2], st[4] = "wheat", 1.0, True, 0.0
         s.env.time = DAY_LENGTH * 0.29
         self.spawn_npc("ulf", "Ulf der Alte", self.sx("Erlenbach", 0.08), rank=1, job="guard",
                        gear=("speer", "holzschild", "gambeson", "kettenhaube"),
@@ -335,13 +332,19 @@ class Story:
             s.camera.shake = 12
             s.sfx("collapse")
             # a chunk of the brink falls away
+            from ..poly.objects import PhysObject
             x = w.abyss_w
+            while x < w.w and w.bottom[x] - w.top[x] < 4:
+                x += 1
             for xx in range(x, x + 14):
-                for y in range(w.h):
-                    if w.fg[xx, y] and w.fg[xx, y] != T.BEDROCK.id:
-                        w.set(xx, y, 0)
-                        if s.rng.random() < 0.08:
-                            s.spawn_falling(xx, y, T.DIRT.id)
+                top = float(w.top[xx])
+                for k in range(3):
+                    if s.rng.random() < 0.5:
+                        r = s.rng.uniform(8, 16)
+                        PhysObject.spawn(w, [(-r, -r * 0.6), (r * 0.8, -r), (r, r * 0.5), (-r * 0.6, r)],
+                                         xx * TILE + 8, top + 20 + k * 40, "rock", "debris", debris=True)
+            w.top[x:x + 14] = w.bottom[x:x + 14]
+            w.set_surface(x, x + 14, w.bottom[x:x + 14].copy())
             gx = (w.abyss_w + 40) * TILE
             self.spawn_npc("greta", "Greta", gx, rank=0, job="child", female=True,
                            lines=["[Hilfe|help]!", "[Mama|mum]!"])
@@ -485,25 +488,21 @@ class Story:
             cx = wolf["x1"] + 40
             g = int(s.world.surface[cx])
             # carve a cave going down and put the chest at its end
-            for i in range(26):
-                for y in range(g + i - 2, g + i + 2):
-                    for xx in (cx + i, cx + i + 1):
-                        if s.world.inside(xx, y):
-                            s.world.fg[xx, y] = 0
-                            s.world.bg[xx, y] = T.BG_STONE
-            for xx in range(cx + 26, cx + 40):
-                for y in range(g + 22, g + 27):
-                    s.world.fg[xx, y] = 0
-                    s.world.bg[xx, y] = T.BG_STONE
-            s.world.fg[cx + 36, g + 26] = T.CHEST.id
-            s.world.fg[cx + 30, g + 24] = T.TORCH.id
-            s.world.chests[(cx + 36, g + 26)] = {"chronik": 1, "silver_coin": 40}
-            for xx in range(cx - 2, cx + 42):
-                for y in range(g - 4, g + 30):
-                    s.world.mark(xx, y)
+            from shapely.geometry import LineString
+            from ..poly.prefab import Decor
+            X, G = cx * TILE, s.world.surface_y(cx * TILE)
+            path = [(X, G - 10), (X + 10 * TILE, G + 9 * TILE), (X + 26 * TILE, G + 22 * TILE),
+                    (X + 40 * TILE, G + 24 * TILE)]
+            s.world.add_cave(LineString(path).buffer(26, quad_segs=3))
+            cy = G + 24 * TILE + 22
+            chest = Decor("chest", X + 36 * TILE, cy, 14, 10, items={"chronik": 1, "silver_coin": 40})
+            chest.data["fresh"] = False
+            s.world.index_add("decor_chunks", chest.x, chest)
+            lamp = Decor("lantern", X + 30 * TILE, cy - 26, 6, 10)
+            s.world.index_add("decor_chunks", lamp.x, lamp)
             from ..entities.animals import Animal
             for i in range(3):
-                a2 = Animal((cx + 28 + i * 3) * TILE, (g + 20) * TILE, "wolf")
+                a2 = Animal(X + (28 + i * 3) * TILE, G + 22 * TILE, "wolf")
                 s.animals.append(a2)
             s.ui.toast("The cave mouth gapes just east of Wolfsheim. Bring a [Fackel|torch].", 7)
         elif a == "glut_battle":

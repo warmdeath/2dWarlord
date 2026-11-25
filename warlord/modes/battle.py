@@ -9,10 +9,10 @@ import numpy as np
 import pygame
 
 from ..settings import TILE, SCREEN_W, WORLD_H, SEA_LEVEL, GOLD
-from ..world import tiles as T
-from ..world import structures as S
-from ..world.world import World
 from ..world.noise import fbm1
+from ..poly.world import PolyWorld, Water
+from ..poly import prefab as S
+from ..poly.flora import Tree
 from ..combat.formation import Haufen
 from ..society.kingdoms import BY_KEY
 from ..ui.common import text, panel, bilingual
@@ -45,7 +45,7 @@ SCENARIOS = {
                          "men stuck below a bank shovel a [Rampe|ramp]. [Leiterträger|ladder men] climb, the "
                          "[Belagerungsturm|siege tower] brings your shields onto the wall,",
                          "and the [Mineure|sappers] dig under it and burn the props.",
-                         "C = orders (Vorwärts!) · E next to an engine starts or stops it."]),
+                         "X = orders (Vorwärts!) · E next to an engine starts or stops it."]),
     "verteidigung": dict(de="Die Verteidigung", en="The Defence", biome="hills", enemy="glutmark",
                          mine=[("bogen", 14), ("armbrust", 12), ("schild", 24), ("hellebarde", 16)],
                          theirs=[("leiter", 26), ("schild", 30), ("bauern", 40), ("mineure", 14), ("armbrust", 20)],
@@ -64,65 +64,68 @@ SCENARIOS = {
 def make_arena(kind, seed=7):
     rng = random.Random(seed)
     W = 960
-    w = World(W, WORLD_H, seed)
+    w = PolyWorld(W, WORLD_H, seed)
     sc = SCENARIOS[kind]
-    xs = np.arange(W, dtype=np.float32)
+    xs = np.arange(W + 1, dtype=np.float32)
     h = 100 + (fbm1(xs, 1 / 60.0, seed, 3) - 0.5) * 6
     if kind == "pass":
         h = 100 - np.clip(np.abs(xs - W / 2) - 70, 0, None) * 0.35 + (fbm1(xs, 1 / 30.0, seed, 3) - 0.5) * 8
         h = np.maximum(h, 40)
-    surf = h.astype(np.int32)
     if kind == "ford":
         c = W // 2
-        for x in range(c - 30, c + 30):
-            t = 1 - abs(x - c) / 30
-            surf[x] += int(5 * t)
-    w.surface[:] = surf
-    ys = np.arange(WORLD_H)[None, :]
-    depth = ys - surf[:, None]
-    fg = np.zeros((W, WORLD_H), dtype=np.uint8)
-    fg[depth >= 0] = T.STONE.id
-    fg[(depth >= 0) & (depth < 6)] = T.DIRT.id
-    top = T.GRASS.id if sc["biome"] != "mountains" else T.GRASS.id
-    fg[depth == 0] = top
-    fg[:, WORLD_H - 3:] = T.BEDROCK.id
-    w.fg[:] = fg
-    w.bg[depth >= 3] = T.BG_DIRT
+        t = np.clip(1 - np.abs(xs - c) / 30, 0, 1)
+        h = h + 5 * t
+    if kind in ("siege", "verteidigung"):
+        g = int(np.median(h[600:760]))
+        h[586:774] = g
+        for i in range(1, 25):
+            f = i / 25
+            h[586 - i] = g * (1 - f) + h[586 - i] * f
+            h[773 + i] = g * (1 - f) + h[773 + i] * f
+    w.top[:] = (h * TILE).astype(np.float32)
+    w.surface[:] = np.round(h[:W]).astype(np.int32)
+    w.bottom[:] = (WORLD_H - 2) * TILE
     w.regions = [(0, W, sc["biome"])]
     w.abyss_w = -10
     if kind == "ford":
         c = W // 2
-        lvl = int(surf[c - 34])
-        for x in range(c - 30, c + 30):
-            if surf[x] > lvl:
-                w.liq[x, lvl:surf[x]] = 8
-    # trees at the edges
-    for x in list(range(10, 160, 9)) + list(range(W - 160, W - 10, 9)):
+        lvl = float(h[c - 34]) * TILE
+        w.water.append(Water((c - 30) * TILE, (c + 30) * TILE, lvl, False))
+    # woods at the edges
+    for x in list(range(10, 160, 7)) + list(range(W - 160, W - 10, 7)):
         if rng.random() < 0.6:
-            from ..world.generator import grow_tree
-            grow_tree(w, x, int(surf[x]), "oak" if sc["biome"] != "mountains" else "pine", rng)
-    for x in range(W):
-        if rng.random() < 0.2 and w.fg[x, surf[x] - 1] == 0:
-            w.fg[x, surf[x] - 1] = T.TALLGRASS.id
+            px = x * TILE + rng.uniform(0, TILE)
+            kind_t = "oak" if sc["biome"] != "mountains" else "pine"
+            if sc["biome"] == "forest" and rng.random() < 0.4:
+                kind_t = rng.choice(["beech", "birch", "pine"])
+            hgt = rng.uniform(150, 240)
+            t = Tree(kind_t, px, w.surface_y(px) + 3, hgt, 13 * (hgt / 190) ** 0.7, rng.randint(0, 1 << 30))
+            w.trees.append(t)
+            w.index_add("tree_chunks", px, t)
+    for x in range(0, W, 3):
+        if rng.random() < 0.15:
+            px = x * TILE
+            w.index_add("decor_chunks", px, S.Decor(rng.choice(["bush", "flowers", "fern"]), px, w.surface_y(px) + 2,
+                                                     14, 12, seed=rng.randint(0, 9999)))
     if kind == "pass":
-        g = int(surf[W // 2])
-        S.wall_tower(w, W // 2, g, height=10, thick=3, gate=True)
-        S.tower(w, W // 2 - 7, g, width=6, height=13)
+        g = int(h[W // 2])
+        S.wall_tower(w, W // 2, g, height=10, thick=3, gate=True, rng=rng)
+        S.tower(w, W // 2 - 7, g, width=6, height=13, rng=rng)
     if kind in ("siege", "verteidigung"):
-        g = int(np.median(surf[600:760]))
-        surf[586:774] = g
-        w.surface[:] = surf
-        for x in range(586, 774):
-            w.fg[x, :g] = 0
-            w.fg[x, g:g + 6] = T.DIRT.id
-            w.fg[x, g] = T.GRASS.id
+        g = int(np.median(h[600:760]))
         S.castle(w, 600, g, rng, size="castle")
         w.castle_g = g
         for gh in w.gatehouses:
-            gh["owner"] = "player" if kind == "verteidigung" else sc["enemy"]
-            gh["auto"] = True
-            gh["pitch"] = 8
+            gh.owner = "player" if kind == "verteidigung" else sc["enemy"]
+            gh.auto = True
+            gh.pitch = 8
     return w
+
+
+def top_of(w, tx):
+    """The highest walkable surface above column tx (a tower top, a wall walk)."""
+    px = tx * TILE + 8
+    return w.ground_y(px, w.surface_y(px) - 700, 760)
 
 
 class Battle:
@@ -176,7 +179,7 @@ class Battle:
         for h in p.haufen:
             h.selected = True
         self.start_counts = (sum(h.count for h in p.haufen), sum(h.count for h in s.formations if h.side != "player"))
-        s.ui.show_card(sc["de"], sc["intro"] + ["", "C = [Befehle|orders] · Tab = select · H = help",
+        s.ui.show_card(sc["de"], sc["intro"] + ["", "X = [Befehle|orders] · Tab = select · H = help",
                                                "Enemy waits until you advance — or until the horn sounds."],
                        subtitle=f"({sc['en']})", on_close=self.horn)
 
@@ -193,11 +196,14 @@ class Battle:
         dcol = mine_colors if defenders_side == "player" else enemy_colors
         acol = enemy_colors if defenders_side == "player" else mine_colors
         attackers_side = sc["enemy"] if defenders_side == "player" else "player"
-        top = g - 14
+        top = top_of(w, 603)
+
+        w.stream(620 * TILE, 3000)
 
         def garrison(unit, n, x, row, no_adv=True, side=defenders_side, col=dcol, facing=-1):
             hf = Haufen(s, side, unit, n, x * TILE + 6, facing, col, leader=p if side == "player" else None)
-            hf.base_row = row
+            hf.base_y = row if row > 500 else row * TILE
+            hf.y_cache = {}
             hf.order = "halt"
             hf.no_advance = no_adv
             s.formations.append(hf)
@@ -207,18 +213,18 @@ class Battle:
 
         if self.kind == "verteidigung":
             garrison("bogen", sc["mine"][0][1], 600, top)
-            garrison("armbrust", sc["mine"][1][1], 611, g - 22)
-            garrison("hellebarde", sc["mine"][3][1], 609, g)
-            garrison("schild", sc["mine"][2][1], 626, g)
+            garrison("armbrust", sc["mine"][1][1], 659, top_of(w, 661))
+            garrison("hellebarde", sc["mine"][3][1], 610, g * TILE)
+            garrison("schild", sc["mine"][2][1], 628, g * TILE)
         else:
             garrison("bogen", 12, 600, top)
-            garrison("schild", 20, 622, g)
-            garrison("raeuber", 26, 584, g, no_adv=False)
+            garrison("schild", 20, 628, g * TILE)
+            garrison("raeuber", 26, 578, w.surface_y(578 * TILE), no_adv=False)
         # wall guards: individuals who man the battlements and shove ladders off
-        for i, tx in enumerate((601, 603, 606, 607, 612, 615)):
-            row = w.ground_at(tx, max(0, top - 4))
+        for i, tx in enumerate((601, 603, 604, 606, 607, 608)):
+            ty = top_of(w, tx)
             look = make_look(s.rng, 1, "guard", kingdom_colors=dcol, soldier=True)
-            h = Humanoid(tx * TILE, row * TILE - 43, look, defenders_side, "Burgwache")
+            h = Humanoid(tx * TILE, ty - 43, look, defenders_side, "Burgwache")
             h.equip(weapon=s.rng.choice(["speer", "schwert", "axt"]), shield="holzschild", armor="gambeson",
                     helmet="eisenhut")
             h.leash = (tx * TILE + 8, 110)
@@ -251,7 +257,7 @@ class Battle:
             p.x = (ax - 70) * TILE
         else:
             p.x = 630 * TILE
-        p.y = (w.ground_at(int(p.x // TILE), max(0, g - 3))) * TILE - p.h - 1
+        p.y = w.ground_y(p.cx, w.surface_y(p.cx) - 60, 200) - p.h - 1
         p.fall_peak = p.y
         s.camera.snap(p.cx, p.cy)
         p.inv.add("pech", 4)
@@ -309,7 +315,7 @@ class Battle:
         r = panel(surf, (SCREEN_W // 2 - 170, 10, 340, 44), 170)
         text(surf, f"{self.sc['de']}  ·  Deine: {mine}  ⚔  Feinde: {theirs}", (r.centerx, r.y + 6), 15, GOLD,
              center=True)
-        text(surf, "C = Befehle (orders) · Tab = Auswahl (select)", (r.centerx, r.y + 26), 11, (190, 190, 180),
+        text(surf, "X = Befehle (orders) · Tab = Auswahl (select)", (r.centerx, r.y + 26), 11, (190, 190, 180),
              center=True)
 
 

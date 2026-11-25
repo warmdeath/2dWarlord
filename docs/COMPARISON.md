@@ -15,7 +15,7 @@ python main.py
 
 | | Prototype (`legacy/`) | This rebuild (`warlord/`) |
 |---|---|---|
-| Code | ~2 000 lines of gameplay in one file, plus a second diverging copy of it (`main.py` and `warlord/game.py` are two different 1 941-line versions) | ~12 600 lines in 52 modules, no duplication |
+| Code | ~2 000 lines of gameplay in one file, plus a second diverging copy of it (`main.py` and `warlord/game.py` are two different 1 941-line versions) | ~18 800 lines in 64 modules (round 3), no duplication |
 | Structure | one `Game` class handling input, physics, AI, drawing, menus and the world | 9 packages with one-way dependencies: world, gfx, entities, combat, society, items, modes, ui, core |
 | World | a 2 600 px sine-wave line with hand-placed anchors | a 48 000 × 256 tile world (about a 1-hour ride), procedurally generated in ~4 s |
 | Terrain | not editable | dig, build, cave in; liquids, fire, falling sand, structural collapse |
@@ -94,3 +94,46 @@ build-and-run-it loop caught bugs in that round too:
 The sapping test is a good example of the physics doing the work. Sappers dig 37 tiles of tunnel, swap 6
 foundation tiles for timber props and set them alight. Fire spreads through the props, and when 3 or more
 adjacent props are gone, the span rule brings 21 bricks of tower wall down.
+
+## Round 3: from tiles to polygons
+
+You asked for no blocks at all: a world of polygons with physics, a bag instead of a slot grid, and crafting by
+shaping wood. The tile version is archived in [`legacy/tile_v2/`](../legacy/tile_v2) so both can be run side by
+side.
+
+| | Round 2 (`legacy/tile_v2/`) | Round 3 (`warlord/`) |
+|---|---|---|
+| Ground | 16 px tiles with rounded corners | a smooth surface line over a rock crust; caves cut out as polygons |
+| Physics | AABB against a tile grid, auto step-up | pymunk rigid bodies: capsules for people and animals, polygons for everything else |
+| Buildings | tiles, a span rule for collapse | pieces (posts, panels, ashlar blocks, roof slabs, doors) in a support graph; unsupported pieces fall as rigid bodies |
+| Trees | trunk and leaf tiles, removed at once | faceted low-poly trees that sway; the trunk topples on a hinge at the stump and lands as a log |
+| Interaction | mine and place any tile | fell, buck, carry, break, place, go underground |
+| Crafting | recipe list | shaping: axe strokes along guide lines in the field, or saw/chisel/drill/rasp at a workbench, matched against 16 forms with a quality score |
+| Inventory | 40 slots + hotbar | a Rucksack limited by weight, a 4-slot belt, bulky things carried in your arms |
+| Animals | ellipses with stick legs | quadruped skeletons with IK legs and real walk, trot and gallop footfall patterns |
+| Ragdolls | verlet points against tiles | rigid bones joined with rotation limits |
+| Drawbridge | swapping tiles | a kinematic plank rotating on its hinge, wound up on chains |
+
+How the switch was made without throwing away rounds 1 and 2: the character body kept its old interface.
+Controllers still set `vx`/`vy` and read `on_ground`, `in_water`, `blocked`; underneath, `physics()` hands the
+wanted velocity to pymunk and `post_step()` reads the result back. So combat, the injury model, NPC brains,
+formations, society, the German weave and the story needed only their world-touching parts rewritten.
+
+Bugs this round's test runs caught:
+- characters walked through closed doors: setting the velocity every frame pushed the capsule through the thin
+  door piece. The controller now projects the wanted velocity along last step's contact normals, so walls stop
+  you and slopes guide you;
+- doorways were 40 px high and people 42 px, so everyone snagged on the lintel even with the door open;
+- palisades and the windmill's post blocked the whole road — in a side view anything across the path is a wall;
+  palisades got a wicket gate, the mill post no longer collides;
+- a ramp meeting a raised walkway's deck left a 6 px edge that stopped walkers; ramps now run flush onto the
+  deck;
+- the castle moat was dug under the outer tower instead of in front of it;
+- drawbridges never moved: the gatehouses were never attached to the physics space after generation;
+- a numpy `float32` from an ore position reached the camera and crashed the parallax drawing;
+- a full bag made dropped items spam "too heavy" every frame; the start kit (60 planks) was over the weight
+  limit, and seeds weighed 2 kg each.
+
+Limits: physics runs only within about 2 700 px of the player; farther away the world is data. NPCs walk,
+jump small obstacles and open doors, but don't plan routes up ladders. Shaping matches against a fixed
+library of forms; anything else is a Rohling you can place but not use as a tool.

@@ -1,4 +1,5 @@
-"""World renderer: cached terrain/liquid chunks, painterly parallax sky, soft tile lighting."""
+"""Sky, sun and moon, clouds, painterly parallax mountains and the camera (the polygon world is drawn by
+poly.render, which builds on this)."""
 import math
 import random
 from collections import OrderedDict
@@ -7,9 +8,7 @@ import numpy as np
 import pygame
 
 from ..settings import TILE, CHUNK, SCREEN_W, SCREEN_H, SEA_LEVEL
-from ..world import tiles as T
 from ..world.noise import fbm1, smooth_array
-from . import tileart
 
 CPX = CHUNK * TILE
 
@@ -34,16 +33,16 @@ class Camera:
         gx = tx - SW / 2 + lead
         gy = ty - SH * 0.58
         k = min(1.0, dt * 6.0)
-        self.x += (gx - self.x) * k
-        self.y += (gy - self.y) * k
+        self.x = float(self.x + (gx - self.x) * k)
+        self.y = float(self.y + (gy - self.y) * k)
         self.y = max(-200, min(world.pixel_h() - SH + 120, self.y))
         self.x = max(-SW * 0.5, min(world.pixel_w() - SW * 0.5, self.x))
         if self.shake > 0:
             self.shake = max(0.0, self.shake - dt * 20)
 
     def snap(self, tx, ty, view=(SCREEN_W, SCREEN_H)):
-        self.x = tx - view[0] / 2
-        self.y = ty - view[1] * 0.58
+        self.x = float(tx - view[0] / 2)
+        self.y = float(ty - view[1] * 0.58)
 
     def offset(self):
         if self.shake > 0:
@@ -65,119 +64,10 @@ class Renderer:
         self.light_cache = None
         self.storm = 0.0
 
-    # ------------------------------------------------------------------ chunk caches
-    def invalidate(self):
-        w = self.world
-        for c in w.dirty:
-            self.terrain.pop(c, None)
-            self.liquid.pop(c, None)
-        w.dirty.clear()
-        for c in w.liquid_dirty:
-            self.liquid.pop(c, None)
-        w.liquid_dirty.clear()
 
-    def _evict(self):
-        while len(self.terrain) > self.max_chunks:
-            c, _ = self.terrain.popitem(last=False)
-            self.liquid.pop(c, None)
 
-    def _render_terrain(self, cx, cy):
-        w = self.world
-        surf = pygame.Surface((CPX, CPX), pygame.SRCALPHA)
-        x0, y0 = cx * CHUNK, cy * CHUNK
-        if x0 >= w.w or y0 >= w.h or x0 + CHUNK <= 0 or y0 + CHUNK <= 0:
-            return surf
-        # padded window for neighbour lookups
-        px0, py0 = max(0, x0 - 1), max(0, y0 - 1)
-        px1, py1 = min(w.w, x0 + CHUNK + 1), min(w.h, y0 + CHUNK + 1)
-        fgp = np.zeros((CHUNK + 2, CHUNK + 2), dtype=np.uint8)
-        fgp[px0 - (x0 - 1):px1 - (x0 - 1), py0 - (y0 - 1):py1 - (y0 - 1)] = w.fg[px0:px1, py0:py1]
-        solid = T.SOLID[fgp]
-        bgw = np.zeros((CHUNK, CHUNK), dtype=np.uint8)
-        ex, ey = min(w.w, x0 + CHUNK), min(w.h, y0 + CHUNK)
-        bgw[:ex - x0, :ey - y0] = w.bg[x0:ex, y0:ey]
-        fg = fgp[1:-1, 1:-1]
-        s = solid
-        up = ~s[1:-1, :-2]
-        dn = ~s[1:-1, 2:]
-        lf = ~s[:-2, 1:-1]
-        rt = ~s[2:, 1:-1]
-        mask = (up & lf) * 1 + (up & rt) * 2 + (dn & lf) * 4 + (dn & rt) * 8
-        blit = surf.blit
-        # background walls
-        nz = np.argwhere(bgw > 0)
-        for lx, ly in nz:
-            if not s[lx + 1, ly + 1] or T.TILES[fg[lx, ly]].deco:
-                b = int(bgw[lx, ly])
-                blit(tileart.bg_surface(b, int(lx * 7 + ly * 3 + x0) % 2), (lx * TILE, ly * TILE))
-        winter = tileart.SEASON == 3
-        snowy_col = [((winter and w.biome_at(x0 + i) not in ("volcanic", "ashland", "lavasea", "ocean")) or
-                      w.biome_at(x0 + i) == "snow") for i in range(CHUNK)]
-        nz = np.argwhere(fg > 0)
-        for lx, ly in nz:
-            tid = int(fg[lx, ly])
-            t = T.TILES[tid]
-            var = int(((lx + x0) * 73856093 ^ (ly + y0) * 19349663) & 3)
-            px, py = lx * TILE, ly * TILE
-            if t.deco or t.style in ("vine", "sapling"):
-                img = tileart.tile_surface(tid, var, 0)
-                blit(img, (px, py + TILE - img.get_height()))
-                continue
-            if tid == T.LOG.id and fgp[lx + 1, ly] != tid and fgp[lx + 1, ly + 2] != tid:
-                blit(tileart.branch_surface(var), (px, py))   # a horizontal limb, not a trunk
-                continue
-            m = int(mask[lx, ly]) if t.natural else 0
-            blit(tileart.tile_surface(tid, var, m), (px, py))
-            if up[lx, ly] and t.natural:
-                if snowy_col[lx]:
-                    blit(tileart.snow_cap(var), (px, py - 3))
-                elif t.style == "grass":
-                    blit(tileart.grass_cap(tid, var), (px, py - 3))
-        if len(nz) and cy * CHUNK > 0:
-            pass
-        return surf
 
-    def _render_liquid(self, cx, cy):
-        w = self.world
-        x0, y0 = cx * CHUNK, cy * CHUNK
-        if x0 >= w.w or y0 >= w.h or x0 + CHUNK <= 0 or y0 + CHUNK <= 0:
-            return None
-        ex, ey = min(w.w, x0 + CHUNK), min(w.h, y0 + CHUNK)
-        liq = w.liq[x0:ex, y0:ey]
-        if not liq.any():
-            return None
-        lava = w.lava[x0:ex, y0:ey]
-        above = np.zeros_like(liq)
-        if y0 > 0:
-            above[:, 0] = w.liq[x0:ex, y0 - 1]
-        above[:, 1:] = liq[:, :-1]
-        surf = pygame.Surface((CPX, CPX), pygame.SRCALPHA)
-        for lx, ly in np.argwhere(liq > 0):
-            amt = int(liq[lx, ly])
-            full = above[lx, ly] > 0
-            h = TILE if full else max(2, amt * TILE // 8)
-            px, py = lx * TILE, ly * TILE + TILE - h
-            if lava[lx, ly]:
-                col = (255, 96 + (ly * 7 + lx * 3) % 30, 24, 235)
-            else:
-                depth = ly + y0 - SEA_LEVEL
-                d = max(0.0, min(1.0, depth / 70.0))
-                col = (int(48 - 30 * d), int(104 - 60 * d), int(150 - 70 * d), int(120 + 90 * d))
-            surf.fill(col, (px, py, TILE, h))
-        return surf
 
-    def get_chunk(self, cx, cy):
-        key = (cx, cy)
-        t = self.terrain.get(key)
-        if t is None:
-            t = self._render_terrain(cx, cy)
-            self.terrain[key] = t
-            self._evict()
-        else:
-            self.terrain.move_to_end(key)
-        if key not in self.liquid:
-            self.liquid[key] = self._render_liquid(cx, cy)
-        return t, self.liquid.get(key)
 
     # ------------------------------------------------------------------ parallax
     def _build_parallax(self):
@@ -377,123 +267,6 @@ class Renderer:
         for k in range(int(w / 8)):
             pygame.draw.rect(surf, c, (x - w / 2 + k * 8, y - 30, 4, 4))
 
-    # ------------------------------------------------------------------ world layers
-    def set_season(self, season):
-        if season != tileart.SEASON:
-            tileart.set_season(season)
-            self.terrain.clear()
-            self.liquid.clear()
 
-    def draw_terrain(self, surf, cam):
-        SW, SH = surf.get_size()
-        self.invalidate()
-        ox, oy = cam.offset()
-        cx0, cy0 = ox // CPX, oy // CPX
-        cx1, cy1 = (ox + SW) // CPX, (oy + SH) // CPX
-        for cy in range(cy0, cy1 + 1):
-            for cx in range(cx0, cx1 + 1):
-                t, _ = self.get_chunk(cx, cy)
-                surf.blit(t, (cx * CPX - ox, cy * CPX - oy))
 
-    def draw_liquids(self, surf, cam, time):
-        SW, SH = surf.get_size()
-        ox, oy = cam.offset()
-        cx0, cy0 = ox // CPX, oy // CPX
-        cx1, cy1 = (ox + SW) // CPX, (oy + SH) // CPX
-        for cy in range(cy0, cy1 + 1):
-            for cx in range(cx0, cx1 + 1):
-                _, l = self.get_chunk(cx, cy)
-                if l is not None:
-                    surf.blit(l, (cx * CPX - ox, cy * CPX - oy))
-        # animated surface highlights
-        w = self.world
-        tx0 = max(0, ox // TILE)
-        tx1 = min(w.w, (ox + SW) // TILE + 1)
-        ty0 = max(1, oy // TILE)
-        ty1 = min(w.h, (oy + SH) // TILE + 1)
-        if tx1 <= tx0 or ty1 <= ty0:
-            return
-        liq = w.liq[tx0:tx1, ty0 - 1:ty1]
-        top = (liq[:, 1:] > 0) & (liq[:, :-1] == 0)
-        for lx, ly in np.argwhere(top):
-            x = tx0 + lx
-            y = ty0 + ly
-            amt = int(w.liq[x, y])
-            py = y * TILE + TILE - amt * TILE // 8 - oy
-            px = x * TILE - ox
-            wave = math.sin(time * 2.2 + x * 0.55) * (1.5 + 5 * self.storm) + \
-                math.sin(time * 1.3 + x * 0.17) * 6 * self.storm
-            if w.lava[x, y]:
-                pygame.draw.line(surf, (255, 200, 90), (px, py + wave), (px + TILE, py - wave), 2)
-            else:
-                pygame.draw.line(surf, (170, 210, 230), (px, py + wave), (px + TILE, py - wave), 1)
 
-    # ------------------------------------------------------------------ lighting
-    def draw_lighting(self, surf, cam, env, dyn_lights):
-        SW, SH = surf.get_size()
-        w = self.world
-        ox, oy = cam.offset()
-        m = 10
-        tx0 = ox // TILE - m
-        ty0 = oy // TILE - m
-        tw = SW // TILE + 2 * m + 2
-        th = SH // TILE + 2 * m + 2
-        fg = np.zeros((tw, th), dtype=np.uint8)
-        bg = np.zeros((tw, th), dtype=np.uint8)
-        liq = np.zeros((tw, th), dtype=np.uint8)
-        lava = np.zeros((tw, th), dtype=bool)
-        ax0, ay0 = max(0, tx0), max(0, ty0)
-        ax1, ay1 = min(w.w, tx0 + tw), min(w.h, ty0 + th)
-        if ax1 > ax0 and ay1 > ay0:
-            sl = (slice(ax0 - tx0, ax1 - tx0), slice(ay0 - ty0, ay1 - ty0))
-            fg[sl] = w.fg[ax0:ax1, ay0:ay1]
-            bg[sl] = w.bg[ax0:ax1, ay0:ay1]
-            liq[sl] = w.liq[ax0:ax1, ay0:ay1]
-            lava[sl] = w.lava[ax0:ax1, ay0:ay1]
-        # outside the world below = dark, above = sky
-        if ty0 + th > w.h:
-            fg[:, max(0, w.h - ty0):] = T.STONE.id
-        solid = T.OPAQUE[fg]
-        sky_open = (~solid) & ((bg == 0) | (bg == T.BG_WINDOW))
-        day = env.daylight()
-        sun = np.where(sky_open, day, 0.0).astype(np.float32)
-        # soft daylight that seeps a few metres into the earth (no harsh black line under the grass)
-        cols = np.arange(tx0, tx0 + tw).clip(0, w.w - 1)
-        surf_rows = w.surface[cols].astype(np.float32)[:, None]
-        depth = (np.arange(ty0, ty0 + th, dtype=np.float32)[None, :] - surf_rows)
-        seep = np.clip(1.0 - depth / 22.0, 0.0, 1.0) * 0.42 * day
-        sun = np.maximum(sun, np.where(depth > 0, seep, 0.0).astype(np.float32))
-        # water absorbs sunlight with depth
-        sun = np.where(liq > 0, sun * 0.8, sun)
-        fire = T.LIGHT[fg].copy()
-        fire = np.maximum(fire, np.where(lava & (liq > 0), 1.0, 0.0).astype(np.float32))
-        for (lx, ly, s) in dyn_lights:
-            i, j = int(lx // TILE) - tx0, int(ly // TILE) - ty0
-            if 0 <= i < tw and 0 <= j < th:
-                fire[i, j] = max(fire[i, j], s)
-        fall_air = np.where(solid, np.where(T.BUILT[fg], 0.05, 0.17), 0.05).astype(np.float32)
-        fall_air = np.where((liq > 0) & ~solid, 0.085, fall_air)
-        fall_fire = np.where(solid, 0.25, 0.075).astype(np.float32)
-        for arr, fall in ((sun, fall_air), (fire, fall_fire)):
-            for _ in range(11):
-                n = arr.copy()
-                n[1:, :] = np.maximum(n[1:, :], arr[:-1, :] - fall[1:, :])
-                n[:-1, :] = np.maximum(n[:-1, :], arr[1:, :] - fall[:-1, :])
-                n[:, 1:] = np.maximum(n[:, 1:], arr[:, :-1] - fall[:, 1:])
-                n[:, :-1] = np.maximum(n[:, :-1], arr[:, 1:] - fall[:, :-1])
-                arr[:] = n
-        # let the first solid layer catch the light of its open neighbour (lit roofs and ground faces)
-        for arr in (sun, fire):
-            d = arr.copy()
-            d[1:, :] = np.maximum(d[1:, :], arr[:-1, :] * 0.92)
-            d[:-1, :] = np.maximum(d[:-1, :], arr[1:, :] * 0.92)
-            d[:, 1:] = np.maximum(d[:, 1:], arr[:, :-1] * 0.92)
-            d[:, :-1] = np.maximum(d[:, :-1], arr[:, 1:] * 0.92)
-            arr[:] = np.where(solid, d, arr)
-        skyc = np.array(env.ambient_color(), dtype=np.float32) / 255.0
-        firec = np.array((1.0, 0.78, 0.5), dtype=np.float32)
-        rgb = sun[..., None] * skyc[None, None, :] + fire[..., None] * firec[None, None, :]
-        rgb = np.clip(rgb + 0.035, 0, 1) * 255
-        small = pygame.surfarray.make_surface(rgb.astype(np.uint8))
-        big = pygame.transform.smoothscale(small, (tw * TILE, th * TILE))
-        surf.blit(big, (tx0 * TILE - ox + TILE // 2, ty0 * TILE - oy + TILE // 2), special_flags=pygame.BLEND_MULT)

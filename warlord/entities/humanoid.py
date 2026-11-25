@@ -263,8 +263,11 @@ class Humanoid(Body):
         self.blocking = False
         if self.mount is not None:
             game.dismount(self)
+        if getattr(self, "carrying", None) is not None:
+            game.put_down(self)
         if killer is not None:
             killer.kills += 1
+        self.detach()
         # the skeleton that animated us becomes a physical ragdoll
         try:
             spin = (self.vx * 0.6) if abs(self.vx) > 40 else random.uniform(-60, 60)
@@ -352,6 +355,8 @@ class Humanoid(Body):
         if self.action is not None and self.action["kind"] in ("bow", "crossbow"):
             sp *= 0.5
         sp *= self.speed_mult() * INJ.speed_factor(self) * (0.0 if self.stagger > 0 else 1.0)
+        if getattr(self, "carrying", None) is not None:
+            sp = min(sp, WALK_SPEED * 0.75)
         if self.slide_t > 0:
             self.slide_t -= dt
             self.vx *= (1 - 1.2 * dt)
@@ -549,11 +554,6 @@ class Humanoid(Body):
             self.hp -= 60 * dt
             self.vy = min(self.vy, -100)
             game.fx.fire(self.cx, self.feet - 6, 2)
-            if self.hp <= 0:
-                self.die(game, None)
-        tx, ty = int(self.cx // TILE), int(self.cy // TILE)
-        if (tx, ty) in game.world.fires or (tx, ty + 1) in game.world.fires:
-            self.hp -= 12 * dt
             if self.hp <= 0:
                 self.die(game, None)
 

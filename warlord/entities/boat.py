@@ -6,7 +6,6 @@ import random
 import pygame
 
 from ..settings import TILE, SEA_LEVEL
-from ..world import tiles as T
 
 
 class Boat:
@@ -52,23 +51,25 @@ class Boat:
         w = game.world
         env = game.env
         self.anim_t += dt
-        tx = int(self.cx // TILE)
-        surf = w.water_surface(tx, int(self.feet // TILE)) if 0 <= tx < w.w else None
+        lvl = w.water_level(self.cx)
+        if lvl is not None and w.surface_y(self.cx) < lvl + 10:
+            lvl = None
+        surf = lvl
         storm = env.rain() * (1.0 if env.current()[0] == "sturm" else 0.4)
         if surf is None:
             # on land or falling
             self.vy += 900 * dt
             self.y += self.vy * dt
-            g = w.ground_at(tx, max(0, int(self.y // TILE)))
-            if self.feet >= g * TILE:
-                self.y = g * TILE - self.h
+            gy = w.ground_y(self.cx, self.y, 600)
+            if self.feet >= gy:
+                self.y = gy - self.h
                 self.vy = 0
                 self.vx *= 0.8
                 self.grounded = True
         else:
             self.grounded = False
             wave = math.sin(self.anim_t * 1.6 + self.x * 0.01) * (2 + storm * 7)
-            target_y = surf * TILE - self.h * 0.55 + wave
+            target_y = surf - self.h * 0.55 + wave
             self.vy += (target_y - self.y) * 6 * dt
             self.vy *= 0.9
             self.y += self.vy * dt
@@ -96,9 +97,7 @@ class Boat:
         nx = self.x + self.vx * dt
         # collide with land at the waterline
         lead = nx + (self.w if self.vx > 0 else 0)
-        ltx = int(lead // TILE)
-        lty = int((self.y + self.h * 0.7) // TILE)
-        if w.inside(ltx, lty) and T.SOLID[w.fg[ltx, lty]]:
+        if w.solid_point(lead, self.y + self.h * 0.7):
             self.vx = 0.0
         else:
             self.x = nx
