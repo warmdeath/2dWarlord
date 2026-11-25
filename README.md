@@ -12,6 +12,10 @@ The world is made of **polygons with real rigid-body physics** (pymunk): smooth 
 buildings assembled from timber, plaster, brick and stone pieces that fall when they lose their support, trees
 that topple on their stumps, and wood you **shape by hand** into doors, stakes, ladders and wheels.
 
+Everything is **painted** like a storybook: leafy tree crowns built from hundreds of leaf dabs, textured earth and
+rock, soft-shaded people and animals, layered hazy distance, cotton clouds lit by the sun (see
+[The painted look](#the-painted-look-round-5)).
+
 ![village](docs/screenshots/46_erlenbach.jpg)
 
 | | |
@@ -26,7 +30,7 @@ that topple on their stumps, and wood you **shape by hand** into doors, stakes, 
 | ![digging](docs/screenshots/47_digging.jpg) | ![riding](docs/screenshots/49_riding.jpg) |
 | ![bow arc](docs/screenshots/48_bow_arc.jpg) | ![bow keys](docs/screenshots/50_bow_keys.jpg) |
 
-![animals](docs/screenshots/44_animals.jpg)
+![animals](docs/screenshots/57_animals.jpg)
 
 The block/tile-based version of round 2 is kept in [`legacy/tile_v2/`](legacy/tile_v2) for comparison.
 
@@ -71,11 +75,12 @@ Python 3.10+. Classic `pygame` 2.x also works. F11 toggles fullscreen, F3 shows 
 
 ## The polygon world (round 3)
 
-- **No blocks.** The ground is a smooth surface over a crust of rock, drawn in faceted low-poly bands (turf,
-  soil, rock strata). Caves are winding passages cut out of it with shapely, with ore veins in their walls (iron,
-  coal, silver in Hochburg, salt, gold deep down, glowing *Glutstein* in Glutmark) and pale mushrooms. Water is
-  a body with a level, waves and buoyancy; the Fire Sea and the Abyss are still at the ends of the world, and the
-  brink still crumbles — now in rigid chunks that tumble into the void.
+- **No blocks.** The ground is a smooth surface over a crust of rock, painted per pixel (a turf lip, crumbly
+  soil, rock strata; see [The painted look](#the-painted-look-round-5)). Caves are winding passages cut out
+  of it with shapely, with ore veins in their walls (iron, coal, silver in Hochburg, salt, gold deep down,
+  glowing *Glutstein* in Glutmark) and pale mushrooms. Water is a body with a level, waves and buoyancy; the
+  Fire Sea and the Abyss are still at the ends of the world, and the brink still crumbles — now in rigid chunks
+  that tumble into the void.
 - **Real physics.** One pymunk space: people and animals are capsules with a hand-animated skeleton on top;
   logs, planks, debris, stones and everything you make are rigid bodies that roll, stack, float and burn. Doors
   are pieces that turn into sensors when they open; upper floors are one-way platforms you jump up through.
@@ -122,6 +127,55 @@ Python 3.10+. Classic `pygame` 2.x also works. F11 toggles fullscreen, F3 shows 
   blanket and bridle.
 - **Ragdolls with joints.** The fallen become chains of rigid bones pinned at the joints with rotation limits;
   they drape over walls and logs and are frozen into still poses after a while to keep big battles cheap.
+
+## The painted look (round 5)
+
+The low-poly facets are gone; the world is painted like a picture book, with the light always coming from the
+upper left.
+
+| | |
+|---|---|
+| ![autumn forest](docs/screenshots/51_autumn.jpg) | ![winter](docs/screenshots/52_winter.jpg) |
+| ![evening](docs/screenshots/53_evening.jpg) | ![field battle](docs/screenshots/54_battle.jpg) |
+
+![trees](docs/screenshots/55_trees.jpg)
+
+![people](docs/screenshots/56_people.jpg)
+
+- **Trees.** Every tree grows a skeleton of branching limbs from its seed, with roots flaring into the soil and
+  bark fissures (or the black marks on a birch). Its crown is a pile of leafy clumps, each painted like a ball
+  lit from the upper left: a dark mass, softened like wet paint, a mid-tone cap and crisp sunlit leaves on top,
+  with gaps where the light falls through to the branches. Oaks spread wide, beeches and limes are round, birches
+  airy, willows hang in curtains; spruces droop in tiers of needles, Scots pines carry flat clouds of needles
+  on a tall foxy-red trunk. Autumn turns them gold and rust, winter leaves bare twigs dusted with snow. Each
+  tree is cached in three layers (back of the crown, wood, front of the crown), which sway by different amounts
+  so the crown rustles; a felled tree's painted crown rides down with the trunk.
+- **Plants.** Bushes are small painted crowns with berries in summer; ferns unfurl leaflet by leaflet;
+  flowers have petals, heather is a haze of purple; reeds carry cattails; grass grows in tufts of curved blades,
+  dark at the root and sunlit at the tip, with patches of tall seeding grass in the meadows.
+- **People.** Figures are painted at twice their size and shrunk smoothly, so edges are clean and small
+  details survive: a rounded head with an eye that catches the light, brow, nose, ear and a blush on the cheek;
+  hair and beards in strands; cloth that folds below the belt, a neckline, a buckle and a purse; mail in rows of
+  rings, plate that gleams; painted helmets and shields. Limbs are soft capsules with a cool shadow on one side
+  and a warm highlight on the other, outlined in a darker shade of their own colour, never black.
+- **Animals.** Smooth bodies drawn through their skeleton points, a shaded belly, muscles that catch the light
+  over shoulder and haunch, fur strokes along the lie of the coat; manes and tails in flowing locks that lift
+  in the gallop; eyes, nostrils and mouths; a blaze on some horses, feathering over the hooves; saddle and
+  bridle in leather.
+- **Ground.** Terrain tiles are painted per pixel from tileable noise: a bright turf lip darkening into the
+  roots, humus under the turf, crumbly soil with pebbles lit on top, a dark seam where soil meets rock, then rock
+  in gently tilted strata with sparse cracks, getting darker the deeper you go. Cave hollows have a shadowed back
+  wall, lit floors and dark ceilings.
+- **Sky and distance.** A three-tone sky; a sun with a wide warm haze; clouds painted from soft puffs with
+  shaded undersides and tops lit by the sun (golden in the evening, slate in a storm); far blue mountains with
+  snow caps, rolling hills and forested ridges, each layer paler and bluer the farther it is, mist pooling at
+  their feet, and a near line of tree crowns.
+- **Light.** Soft contact shadows under people, animals, trees and houses; warm glows around fires, torches and
+  lit windows at night; smoke rises in soft puffs; water mirrors the sky near its surface and laps the shore
+  in foam; a gentle vignette.
+- **Speed.** Everything expensive is cached and painted ahead: terrain tiles and trees that are about to scroll
+  into view are prepared within a few milliseconds per frame. Riding through new country averages about 17 ms
+  per frame on the test machine (about 58 fps).
 
 ## What's in the world
 
@@ -203,7 +257,7 @@ pierce and blunt, and slows you down.
 
 ### Bodies, wounds and armour
 
-Characters are **modular low-poly skeletons**: tapered, two-tone limbs on bones, driven by layered poses
+Characters are **modular skeletons** with painted, softly shaded limbs on bones, driven by layered poses
 (legs move, arms act, and the two blend smoothly). When someone dies, the same skeleton becomes a **verlet
 ragdoll** of jointed rigid bones that tumbles down slopes and settles, and soldiers falling out of formation ranks do
 the same.
@@ -328,10 +382,11 @@ warlord/
   core/app.py               window, main loop, scenes, save/load (pickle + zlib)
   poly/                     world (terrain lines, caves, water, pymunk space, streaming) · gen (geography,
                             settlements, flora) · prefab (buildings from pieces, support graph, gatehouses)
-                            materials · objects (rigid bodies) · flora (low-poly trees) · render
+                            materials · objects (rigid bodies) · flora (painted trees) · render
   world/                    noise · weather
-  gfx/                      renderer (sky, parallax, camera) · rig (low-poly humanoid skeleton) · quadruped
-                            (IK legs, gaits) · sprites · fx · ambient (birds, smoke…)
+  gfx/                      paint (noise, dabs, soft limbs, glows, supersampling) · renderer (sky, clouds,
+                            parallax, camera) · rig (humanoid skeleton) · quadruped (IK legs, gaits) · sprites ·
+                            fx · ambient (birds, smoke…)
   entities/                 body (pymunk capsule) · humanoid · ragdoll (jointed rigid bones) · player · npc
                             (brains) · animals · boat · projectile
   combat/                   weapons · combat · injury · units · formation (Haufen) · siege

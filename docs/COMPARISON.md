@@ -106,7 +106,7 @@ side.
 | Ground | 16 px tiles with rounded corners | a smooth surface line over a rock crust; caves cut out as polygons |
 | Physics | AABB against a tile grid, auto step-up | pymunk rigid bodies: capsules for people and animals, polygons for everything else |
 | Buildings | tiles, a span rule for collapse | pieces (posts, panels, ashlar blocks, roof slabs, doors) in a support graph; unsupported pieces fall as rigid bodies |
-| Trees | trunk and leaf tiles, removed at once | faceted low-poly trees that sway; the trunk topples on a hinge at the stump and lands as a log |
+| Trees | trunk and leaf tiles, removed at once | painted trees (branching limbs, leaf-dab crowns, bark) that sway and rustle; the trunk topples on a hinge at the stump and lands as a log |
 | Interaction | mine and place any tile | fell, buck, carry, break, place, go underground |
 | Crafting | recipe list | shaping: axe strokes along guide lines in the field, or saw/chisel/drill/rasp at a workbench, matched against 16 forms with a quality score |
 | Inventory | 40 slots + hotbar | a Rucksack limited by weight, a 4-slot belt, bulky things carried in your arms |
