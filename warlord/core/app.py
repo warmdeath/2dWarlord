@@ -117,6 +117,13 @@ class App:
                     self.show_fps = not self.show_fps
                 elif e.type == pygame.KEYDOWN and e.key == pygame.K_F11:
                     pygame.display.toggle_fullscreen()
+                elif e.type == pygame.KEYDOWN and e.key == pygame.K_F7:
+                    # try the character looks: classic, storybook, ink, oil
+                    from ..gfx import figure, sprites
+                    name = figure.cycle()
+                    sprites._cache.clear()
+                    if getattr(self, "session", None) is not None:
+                        self.session.ui.toast(f"Figures: {name}")
             self.scene.update(dt, events)
             self.scene.draw(self.screen)
             self.lingua_t += dt
