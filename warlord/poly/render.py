@@ -101,6 +101,7 @@ class PolyRenderer(SkyRenderer):
             for c in w.dirty:
                 self._chunk_full.pop(c, None)
             w.dirty.clear()
+            self.__dict__.get("_grass", {}).clear()
 
     def biome(self, px):
         return self.world.biome_at(int(px // TILE))
@@ -405,50 +406,74 @@ class PolyRenderer(SkyRenderer):
                     pygame.draw.line(surf, shade(c, 1.3), tri[0], tri[1], 1)
 
     # ------------------------------------------------------------------ ground cover (live, sways)
+    def _grass_at(self, x):
+        """The static part of a tuft of grass at world x (cached): where it grows and its blades."""
+        w = self.world
+        col = int(x // TILE)
+        if not (0 <= col < w.w):
+            return None
+        bio = w.biome_at(col)
+        if bio not in ("plains", "forest", "hills", "vineyard", "moor", "mountains", "coast", "edge"):
+            return None
+        if w.water_level(x) is not None or w.settlement_at(col) is not None:
+            return None
+        base = self.top_col(bio, x)
+        tall_bio = bio in ("plains", "moor", "hills", "edge")
+        patch = 0.5 + 0.5 * math.sin(x * 0.013 + 1.7) * math.sin(x * 0.0041)
+        hmax = (5 + (13 if tall_bio else 7) * patch) * (0.6 if bio == "coast" else 1.0)
+        nb = 2 + int(hf(x, 21) * 3)
+        blades = []
+        for b in range(nb):
+            r1 = hf(x, b, 17)
+            r2 = hf(x, b, 29)
+            hh = hmax * (0.45 + 0.55 * hf(x, b, 23))
+            root = shade(base, 0.55 + 0.15 * r1)
+            tip = paint.mix(shade(base, 0.82 + 0.22 * r2), (196, 186, 112), 0.25 * (r2 > 0.8))
+            blades.append(((b - nb / 2) * 1.3 + r1, hh, (r1 - 0.5) * hh * 0.5, root, tip, b))
+        head = None
+        if patch > 0.75 and tall_bio and hf(x, 31) < 0.12:
+            head = (hmax * 1.6, shade(base, 0.9))
+        return (w.surface_y(x), blades, head)
+
     def draw_grass(self, surf, cam, time, wind):
         """Tufts of grass along the turf: a few curved blades each, darker at the root, sunlit at the tip;
         patches of tall meadow grass come and go along the ground."""
         SW, SH = surf.get_size()
         ox, oy = cam.offset()
-        w = self.world
         if self.season == "winter":
             return
+        cache = self.__dict__.setdefault("_grass", {})
+        if cache.get("_season") != self.season or len(cache) > 30000:
+            cache.clear()
+            cache["_season"] = self.season
         step = 4
         x = int(ox // step) * step - step
         gust = wind * 2.2
-        tall_bio = ("plains", "moor", "hills", "edge")
+        amp = 0.8 + abs(wind) * 2.2
         draw_lines = pygame.draw.lines
+        draw_line = pygame.draw.line
+        sin = math.sin
         while x < ox + SW + step:
-            col = int(x // TILE)
-            if 0 <= col < w.w:
-                bio = w.biome_at(col)
-                if bio in ("plains", "forest", "hills", "vineyard", "moor", "mountains", "coast", "edge"):
-                    y = w.surface_y(x) - oy
-                    if -30 < y < SH + 10 and w.water_level(x) is None and w.settlement_at(col) is None:
-                        base = self.top_col(bio, x)
-                        patch = 0.5 + 0.5 * math.sin(x * 0.013 + 1.7) * math.sin(x * 0.0041)
-                        hmax = (5 + (13 if bio in tall_bio else 7) * patch) * (0.6 if bio == "coast" else 1.0)
-                        nb = 2 + int(hf(x, 21) * 3)
-                        for b in range(nb):
-                            r1 = hf(x, b, 17)
-                            bx = x - ox + (b - nb / 2) * 1.3 + r1
-                            hh = hmax * (0.45 + 0.55 * hf(x, b, 23))
-                            sw = (math.sin(time * 2.0 + x * 0.05 + b) * (0.8 + abs(wind) * 2.2) + gust) * hh / 10
-                            lean = (r1 - 0.5) * hh * 0.5
-                            root = shade(base, 0.55 + 0.15 * r1)
-                            r2 = hf(x, b, 29)
-                            tip = paint.mix(shade(base, 0.82 + 0.22 * r2), (196, 186, 112), 0.25 * (r2 > 0.8))
-                            m = (bx + lean * 0.4 + sw * 0.3, y - hh * 0.55)
-                            t = (bx + lean + sw, y - hh)
-                            draw_lines(surf, root, False, [(bx, y + 3), (bx + lean * 0.15, y - hh * 0.25), m], 1)
-                            pygame.draw.line(surf, tip, m, t, 1)
-                        if patch > 0.75 and bio in tall_bio and hf(x, 31) < 0.12:
-                            # a seed head of tall grass
-                            hh = hmax * 1.6
-                            sw = (math.sin(time * 1.6 + x * 0.04) * (1 + abs(wind) * 2) + gust * 1.4) * hh / 10
-                            t = (x - ox + sw, y - hh)
-                            pygame.draw.aaline(surf, shade(base, 0.9), (x - ox, y + 2), t)
-                            pygame.draw.ellipse(surf, (196, 180, 120), (t[0] - 1.2, t[1] - 3, 2.6, 6))
+            g = cache.get(x, False)
+            if g is False:
+                g = cache[x] = self._grass_at(x)
+            if g is not None:
+                gy, blades, head = g
+                y = gy - oy
+                if -30 < y < SH + 10:
+                    sx = x - ox
+                    for (bo, hh, lean, root, tip, b) in blades:
+                        bx = sx + bo
+                        sw = (sin(time * 2.0 + x * 0.05 + b) * amp + gust) * hh / 10
+                        m = (bx + lean * 0.4 + sw * 0.3, y - hh * 0.55)
+                        draw_lines(surf, root, False, [(bx, y + 3), (bx + lean * 0.15, y - hh * 0.25), m], 1)
+                        draw_line(surf, tip, m, (bx + lean + sw, y - hh), 1)
+                    if head is not None:
+                        hh, c = head
+                        sw = (sin(time * 1.6 + x * 0.04) * (1 + abs(wind) * 2) + gust * 1.4) * hh / 10
+                        t = (sx + sw, y - hh)
+                        pygame.draw.aaline(surf, c, (sx, y + 2), t)
+                        pygame.draw.ellipse(surf, (196, 180, 120), (t[0] - 1.2, t[1] - 3, 2.6, 6))
             x += step
 
     # ------------------------------------------------------------------ water
@@ -671,7 +696,16 @@ class PolyRenderer(SkyRenderer):
         skyc = np.array(env.ambient_color(), dtype=np.float32) / 255.0
         firec = np.array((1.0, 0.76, 0.48), dtype=np.float32)
         rgb = sun[..., None] * skyc[None, None, :] + fire[..., None] * firec[None, None, :]
-        rgb = np.clip(rgb + 0.065, 0, 1) * 255
+        rgb = np.clip(rgb + 0.065, 0, 1)
+        # a soft vignette draws the eye to the middle of the picture (folded into the light grid)
+        vg = getattr(self, "_vig_grid", None)
+        if vg is None or vg.shape != rgb.shape[:2]:
+            xs_ = (np.arange(gw, dtype=np.float32) * cs / SW * 2 - 1)
+            ys_ = (np.arange(gh, dtype=np.float32) * cs / SH * 2 - 1)
+            d = np.sqrt((xs_[:, None] * 0.85) ** 2 + (ys_[None, :]) ** 2)
+            vg = (1 - np.clip((d - 0.6) / 0.9, 0, 1) ** 1.6 * 0.38).astype(np.float32)
+            self._vig_grid = vg
+        rgb = rgb * vg[..., None] * 255
         small = pygame.surfarray.make_surface(rgb.astype(np.uint8))
         big = pygame.transform.smoothscale(small, (gw * cs, gh * cs))
         surf.blit(big, (0, 0), special_flags=pygame.BLEND_MULT)
@@ -686,16 +720,6 @@ class PolyRenderer(SkyRenderer):
             r = int(30 + 60 * st)
             g = paint.add_glow(r, (255, 170, 90), round(min(0.6, k * 0.5), 1), 1.8)
             surf.blit(g, (lx - ox - r, ly - oy - r), special_flags=pygame.BLEND_RGB_ADD)
-        # a soft vignette draws the eye to the middle of the picture
-        vg = getattr(self, "_vignette", None)
-        if vg is None or vg.get_size() != (SW, SH):
-            xs_ = (np.arange(SW, dtype=np.float32) / SW * 2 - 1)
-            ys_ = (np.arange(SH, dtype=np.float32) / SH * 2 - 1)
-            d = np.sqrt((xs_[:, None] * 0.85) ** 2 + (ys_[None, :]) ** 2)
-            v = (1 - np.clip((d - 0.6) / 0.9, 0, 1) ** 1.6 * 0.38) * 255
-            vg = pygame.surfarray.make_surface(np.repeat(v[:, :, None], 3, 2).astype(np.uint8))
-            self._vignette = vg
-        surf.blit(vg, (0, 0), special_flags=pygame.BLEND_MULT)
 
     def lights_in_view(self, cam, SW, SH, night):
         """Static light sources of buildings, decor, ores and lava near the screen."""

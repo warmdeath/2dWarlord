@@ -275,17 +275,13 @@ class Renderer:
         cz = cam.y - SEA_LEVEL * TILE
 
         def layer_pts(prof, f, base_y, hscale, step=6, jag=0.0, seed=0):
-            pts = [(0, SH)]
-            for sx in range(0, SW + step, step):
-                wx = (cam.x + SW / 2 + (sx - SW / 2) / f) / TILE / 8
-                i = int(max(0, min(len(prof) - 2, wx)))
-                fr = wx - int(wx)
-                h = prof[i] * (1 - fr) + prof[i + 1] * fr
-                if jag:
-                    h += jag * math.sin(wx * 3.1 + seed) * math.sin(wx * 7.3 + seed * 2)
-                pts.append((sx, float(base_y - h * hscale)))
-            pts.append((SW, SH))
-            return pts
+            sxs = np.arange(0, SW + step, step, dtype=np.float64)
+            wx = (cam.x + SW / 2 + (sxs - SW / 2) / f) / TILE / 8
+            h = np.interp(np.clip(wx, 0, len(prof) - 1), np.arange(len(prof)), prof)
+            if jag:
+                h = h + jag * np.sin(wx * 3.1 + seed) * np.sin(wx * 7.3 + seed * 2)
+            ys = base_y - h * hscale
+            return [(0, SH)] + list(zip(sxs.tolist(), ys.tolist())) + [(SW, SH)]
 
         def mist(base_y, depth, col, a):
             if base_y > SH:
@@ -370,27 +366,45 @@ class Renderer:
             else:
                 gy = base_y
             hh = (36 + (k * 7919) % 46) * size
-            if (k * 31) % 3 == 0:
-                # a fir: stacked drooping tiers
-                for t in range(4):
-                    u = t / 4
-                    wdt = hh * 0.3 * (1 - u * 0.7)
-                    yb = gy - hh * (0.15 + 0.7 * u)
-                    pygame.draw.polygon(surf, col, [(sxx - wdt, yb + 3), (sxx, yb - hh * 0.3), (sxx + wdt, yb + 3)])
-                    pygame.draw.line(surf, lit, (sxx - wdt * 0.9, yb + 2), (sxx, yb - hh * 0.28), 1)
-                pygame.draw.rect(surf, col, (sxx - 1, gy - hh * 0.2, 3, hh * 0.2 + 4))
-            else:
-                r = hh * 0.36
-                cy = gy - hh * 0.6
-                rng = random.Random(k)
-                pygame.draw.rect(surf, col, (sxx - 2, cy, 4, gy - cy + 4))
-                for q in range(5):
-                    a = rng.uniform(0, math.tau)
-                    d = rng.uniform(0, r * 0.6)
-                    pygame.draw.circle(surf, col, (sxx + math.cos(a) * d, cy + math.sin(a) * d * 0.7),
-                                       r * rng.uniform(0.55, 0.8))
-                pygame.draw.circle(surf, lit, (sxx - r * 0.35, cy - r * 0.45), r * 0.35)
-                pygame.draw.circle(surf, col, (sxx - r * 0.2, cy - r * 0.3), r * 0.36)
+            spr, ox_, oy_ = self._ridge_tree_sprite(k % 23, int(hh), (k * 31) % 3 == 0, col, lit)
+            surf.blit(spr, (sxx - ox_, gy - oy_))
+
+    def _ridge_tree_sprite(self, variant, hh, fir, col, lit):
+        """One distant tree silhouette, cached by shape and colour (colours change slowly with the hour)."""
+        cache = self.__dict__.setdefault("_rtree", {})
+        q = lambda c: tuple((v // 4) * 4 for v in c)
+        key = (variant, hh, fir, q(col), q(lit))
+        e = cache.get(key)
+        if e is not None:
+            return e
+        if len(cache) > 600:
+            cache.clear()
+        col, lit = q(col), q(lit)
+        W, H = int(hh * 0.8) + 8, hh + 10
+        s = pygame.Surface((W, H), pygame.SRCALPHA)
+        x, gy = W / 2, H - 4
+        if fir:
+            for t in range(4):
+                u = t / 4
+                wdt = hh * 0.3 * (1 - u * 0.7)
+                yb = gy - hh * (0.15 + 0.7 * u)
+                pygame.draw.polygon(s, col, [(x - wdt, yb + 3), (x, yb - hh * 0.3), (x + wdt, yb + 3)])
+                pygame.draw.line(s, lit, (x - wdt * 0.9, yb + 2), (x, yb - hh * 0.28), 1)
+            pygame.draw.rect(s, col, (x - 1, gy - hh * 0.2, 3, hh * 0.2 + 4))
+        else:
+            r = hh * 0.36
+            cy = gy - hh * 0.6
+            rng = random.Random(variant)
+            pygame.draw.rect(s, col, (x - 2, cy, 4, gy - cy + 4))
+            for q_ in range(5):
+                a = rng.uniform(0, math.tau)
+                d = rng.uniform(0, r * 0.6)
+                pygame.draw.circle(s, col, (x + math.cos(a) * d, cy + math.sin(a) * d * 0.7), r * rng.uniform(0.55, 0.8))
+            pygame.draw.circle(s, lit, (x - r * 0.35, cy - r * 0.45), r * 0.35)
+            pygame.draw.circle(s, col, (x - r * 0.2, cy - r * 0.3), r * 0.36)
+        e = (s, W / 2, gy)
+        cache[key] = e
+        return e
 
     @staticmethod
     def _castle_silhouette(surf, x, y, c, kind):

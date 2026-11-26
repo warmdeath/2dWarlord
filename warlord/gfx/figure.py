@@ -125,10 +125,18 @@ def shape(surf, pts, col, st, S, depth, flat=False, hatch=True):
                     x, y = pts[i]
                     pygame.draw.line(surf, oc, (x, y), (x - nx * ln + LIGHT[0] * ln * 0.3, y - ny * ln + LIGHT[1] * ln * 0.3), hl)
         if st.ink is not None:
-            # ink is heavier on the shadow side
-            for i in range(len(pts)):
-                if lit[i] < -0.35 and lit[(i + 1) % len(pts)] < -0.35:
-                    pygame.draw.line(surf, oc, pts[i], pts[(i + 1) % len(pts)], lw + 1)
+            # ink is heavier on the shadow side: one stroke per run of shadowed outline
+            run = []
+            for i in range(len(pts) + 1):
+                j = i % len(pts)
+                if lit[j] < -0.35:
+                    run.append(pts[j])
+                else:
+                    if len(run) > 1:
+                        pygame.draw.lines(surf, oc, False, run, lw + 1)
+                    run = []
+            if len(run) > 1:
+                pygame.draw.lines(surf, oc, False, run, lw + 1)
     elif st.name == "oil":
         # no outline: just a soft dark edge where the form turns away
         for i in range(len(pts)):
@@ -163,7 +171,8 @@ def limb_outline(a, b, prof, f, S, k=1.0, t0=0.0, t1=1.0, cap_a=True, cap_b=True
                 u = u * u * (3 - 2 * u)
                 return wa + (wb - wa) * u, ba + (bb - ba) * u
         return pts[-1][1], pts[-1][2]
-    n = 7
+    lod = S < 3.5                                       # game size: fewer points are enough
+    n = 4 if lod else 7
     ts = [t0 + (t1 - t0) * i / n for i in range(n + 1)]
     front, back = [], []
     for t in ts:
@@ -177,8 +186,9 @@ def limb_outline(a, b, prof, f, S, k=1.0, t0=0.0, t1=1.0, cap_a=True, cap_b=True
     ex, ey = a[0] + dx * t1, a[1] + dy * t1
     if cap_b:
         r = (wf + wb) / 2 * S * k
-        for i in range(1, 6):
-            ang = math.pi * i / 6
+        nc = 3 if lod else 6
+        for i in range(1, nc):
+            ang = math.pi * i / nc
             # rotate the front normal toward the back, bulging along the bone
             vx = fx * math.cos(ang) + ux * math.sin(ang)
             vy = fy * math.cos(ang) + uy * math.sin(ang)
@@ -188,8 +198,9 @@ def limb_outline(a, b, prof, f, S, k=1.0, t0=0.0, t1=1.0, cap_a=True, cap_b=True
         wf, wb = at(t0)
         sx, sy = a[0] + dx * t0, a[1] + dy * t0
         r = (wf + wb) / 2 * S * k
-        for i in range(1, 6):
-            ang = math.pi * i / 6
+        nc = 3 if lod else 6
+        for i in range(1, nc):
+            ang = math.pi * i / nc
             vx = -fx * math.cos(ang) - ux * math.sin(ang)
             vy = -fy * math.cos(ang) - uy * math.sin(ang)
             out.append((sx + vx * r, sy + vy * r))
@@ -219,7 +230,7 @@ def torso_outline(Tt, tl, hem, robe, S, st):
             (flare * 0.96, hem), (flare * 0.82, hem * 0.45), (4.2 if st.name == "manga" else 4.4, 0.2),
             (waist_f, -tl * 0.2), (chest, -tl * 0.55), (chest - 0.5, -tl * 0.8), (1.9, -tl - 0.7)]
     from .quadruped import smooth_closed
-    return [Tt(x * S, y * S) for x, y in smooth_closed(ctrl, 3)]
+    return [Tt(x * S, y * S) for x, y in smooth_closed(ctrl, 2 if S < 3.5 else 3)]
 
 
 MANGA_HEAD = [(0.2, -5.4), (2.6, -4.8), (3.9, -3.1), (4.15, -1.5), (3.95, -0.8), (4.5, 0.3), (5.1, 1.0),
@@ -231,12 +242,12 @@ def head_outline(T, r, st=None):
     """The head in profile: crown, forehead, brow, nose, lips, chin, jaw, back of the skull."""
     if st is not None and st.name == "manga":
         from .quadruped import smooth_closed
-        return [T(x * r, y * r) for x, y in smooth_closed(MANGA_HEAD, 2)]
+        return [T(x * r, y * r) for x, y in (MANGA_HEAD if r < 3.0 else smooth_closed(MANGA_HEAD, 2))]
     ctrl = [(0.2, -5.3), (2.7, -4.7), (4.0, -3.0), (4.25, -1.5), (4.0, -0.85), (4.6, 0.2), (5.35, 1.15),
             (4.45, 1.45), (4.55, 2.25), (4.25, 2.75), (4.4, 3.45), (3.6, 4.55), (1.4, 4.7), (-0.4, 3.4),
             (-2.2, 2.6), (-4.0, 1.3), (-4.7, -1.0), (-3.7, -3.9)]
     from .quadruped import smooth_closed
-    return [T(x * r, y * r) for x, y in smooth_closed(ctrl, 2)]
+    return [T(x * r, y * r) for x, y in (ctrl if r < 3.0 else smooth_closed(ctrl, 2))]
 
 
 def hand(surf, c, f, S, col, st, wrist=None):

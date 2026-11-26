@@ -66,6 +66,7 @@ class Body:
         d["_world"] = None
         d["_shape_h"] = None
         d["contacts"] = []
+        d.pop("_fig_cache", None)      # a cached drawing (a pygame Surface) does not pickle
         return d
 
     # ------------------------------------------------------------- geometry

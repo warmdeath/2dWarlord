@@ -189,8 +189,10 @@ upper left.
   lit windows at night; smoke rises in soft puffs; water mirrors the sky near its surface and laps the shore
   in foam; a gentle vignette.
 - **Speed.** Everything expensive is cached and painted ahead: terrain tiles and trees that are about to scroll
-  into view are prepared within a few milliseconds per frame. Riding through new country averages about 17 ms
-  per frame on the test machine (about 58 fps).
+  into view are prepared within a few milliseconds per frame; people who hold still (talking, working,
+  standing guard) reuse their last drawing until a joint moves; distant tree silhouettes, grass and hill
+  profiles are cached or computed in bulk. With the ink figures, villages and towns run at about 19–23 ms per
+  frame and big battles at 22–28 ms on the test machine.
 
 ## What's in the world
 

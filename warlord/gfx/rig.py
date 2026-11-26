@@ -445,8 +445,26 @@ def draw_humanoid(surf, h, sx, sy, scale=1.0, tint=None):
     R = int(max(30 * scale, reach) + 8)
     top = int(R + 30 * scale)
     bot = int(R * 0.6 + 8)
-    canvas = paint.CANVAS.get(2 * R * SSf, (top + bot) * SSf)
     st = figure.current()
+    key = None
+    if tint is None and getattr(h, "ragdoll", None) is None and not getattr(h, "trail", None):
+        # people standing, talking or working keep the same pose for many frames: reuse the last drawing
+        # until a joint moves by half a pixel or anything about them changes
+        p = h.pose
+        J = place(skeleton(p), 0.0, 0.0, h.facing, p.rot, 1.0)
+        act = h.action
+        key = (figure.STYLE[0], scale, id(h.look), h.facing, p.weapon_mode, p.shield_up, round(p.draw, 1),
+               round(p.wa, 1) if p.wa is not None else None, h.weapon_key, h.helmet, id(h.armor), id(h.shield),
+               getattr(h, "mount", None) is not None, act.get("kind") if act else None, h.hurt_flash > 0,
+               tuple(int(v[0] * 2) for v in J.values()), tuple(int(v[1] * 2) for v in J.values()),
+               int(abs(getattr(h, "vx", 0)) // 60) if figure.STYLE[0] == "manga" else 0,
+               int(getattr(h, "anim_t", 0) * 6) if figure.STYLE[0] == "manga" else 0,
+               tuple(sorted((getattr(h, "injury", None) or {}).items())))
+        c = getattr(h, "_fig_cache", None)
+        if c is not None and c[0] == key:
+            surf.blit(c[1], (int(sx) - c[2], int(sy) - c[3]))
+            return
+    canvas = paint.CANVAS.get(2 * R * SSf, (top + bot) * SSf)
     if st is None:
         _draw_humanoid(canvas, h, R * SSf, top * SSf, scale * SSf, tint, SSf, sx, sy)
     else:
@@ -455,6 +473,8 @@ def draw_humanoid(surf, h, sx, sy, scale=1.0, tint=None):
             canvas = pygame.transform.gaussian_blur(canvas, st.blur)
     small = paint.shrink(canvas, SSf)
     surf.blit(small, (int(sx) - R, int(sy) - top))
+    if key is not None:
+        h._fig_cache = (key, small, R, top)
 
 
 def _draw_humanoid(surf, h, sx, sy, scale, tint, ss, osx, osy):
