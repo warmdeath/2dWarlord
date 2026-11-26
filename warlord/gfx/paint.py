@@ -237,6 +237,27 @@ def soft_limb(surf, a, b, wa, wb, color, edge=1.0, lit=True):
                 wa * 0.3, wb * 0.3, warm(color, 0.2))
 
 
+# ====================================================================== compatibility
+def blur(surf, r):
+    """A soft blur that works on every pygame: the gaussian blur of pygame-ce 2.2+, else a box blur, else a
+    shrink-and-grow (alpha is kept in all three)."""
+    r = max(1, int(r))
+    tf = pygame.transform
+    if hasattr(tf, "gaussian_blur"):
+        return tf.gaussian_blur(surf, r)
+    if hasattr(tf, "box_blur"):
+        return tf.box_blur(surf, r)
+    w, h = surf.get_size()
+    k = 1 + r
+    small = tf.smoothscale(surf, (max(1, w // k), max(1, h // k)))
+    return tf.smoothscale(small, (w, h))
+
+
+def smoothscale_by(surf, f):
+    w, h = surf.get_size()
+    return pygame.transform.smoothscale(surf, (max(1, int(w * f)), max(1, int(h * f))))
+
+
 # ====================================================================== supersampled drawing
 class SSCanvas:
     """Draw at SS times the size into a scratch surface, then shrink with smoothing: anti-aliased figures."""
@@ -279,7 +300,7 @@ def paint_crown(surf, clumps, pal, rng, edge_leaves=True, leafy=1.0, ao=0.0, sun
     if blur:
         seed = rng.randint(0, 1 << 30)
         paint_crown(surf, clumps, pal, random.Random(seed), edge_leaves, leafy, ao, sun, "mass", needles, squash)
-        soft = pygame.transform.gaussian_blur(surf, blur)
+        soft = globals()['blur'](surf, blur)
         surf.fill((0, 0, 0, 0))
         surf.blit(soft, (0, 0))
         paint_crown(surf, clumps, pal, random.Random(seed), edge_leaves, leafy, ao, sun, "light", needles, squash,

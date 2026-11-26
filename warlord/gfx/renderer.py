@@ -257,7 +257,7 @@ class Renderer:
                 key = ("s", k, round(sc, 1), q(lit), q(dark), (alpha // 16) * 16)
                 im2 = self._ccache.get(key)
                 if im2 is None:
-                    im2 = pygame.transform.smoothscale_by(img, round(sc, 1))
+                    im2 = paint.smoothscale_by(img, round(sc, 1))
                     self._ccache[key] = im2
                 img = im2
             surf.blit(img, (x, c[1] - img.get_height() * 0.5))

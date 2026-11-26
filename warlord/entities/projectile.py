@@ -46,6 +46,7 @@ class Projectile:
         w = game.world
         for _ in range(steps):
             px, py = self.x, self.y
+            self.px, self.py = px, py
             self.x += self.vx * sdt
             self.y += self.vy * sdt
             hit = None

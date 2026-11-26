@@ -29,17 +29,20 @@ CAT_OBJECT = 4
 CAT_CHAR = 8
 CAT_DEBRIS = 16
 CAT_PLATFORM = 32
+CAT_EARTH = 64         # loose clods of earth (poly.earth)
 ALL = 0xFFFF
 
 F_TERRAIN = pymunk.ShapeFilter(categories=CAT_TERRAIN)
 F_STRUCT = pymunk.ShapeFilter(categories=CAT_STRUCT)
 F_PLATFORM = pymunk.ShapeFilter(categories=CAT_PLATFORM)
 F_OBJECT = pymunk.ShapeFilter(categories=CAT_OBJECT, mask=CAT_TERRAIN | CAT_STRUCT | CAT_OBJECT | CAT_CHAR |
-                              CAT_PLATFORM)
-F_DEBRIS = pymunk.ShapeFilter(categories=CAT_DEBRIS, mask=CAT_TERRAIN | CAT_STRUCT | CAT_OBJECT | CAT_PLATFORM)
-F_CHAR = pymunk.ShapeFilter(categories=CAT_CHAR, mask=CAT_TERRAIN | CAT_STRUCT | CAT_OBJECT | CAT_PLATFORM)
+                              CAT_PLATFORM | CAT_EARTH)
+F_DEBRIS = pymunk.ShapeFilter(categories=CAT_DEBRIS, mask=CAT_TERRAIN | CAT_STRUCT | CAT_OBJECT | CAT_PLATFORM |
+                              CAT_EARTH)
+F_CHAR = pymunk.ShapeFilter(categories=CAT_CHAR, mask=CAT_TERRAIN | CAT_STRUCT | CAT_OBJECT | CAT_PLATFORM |
+                            CAT_EARTH)
 Q_SOLID = pymunk.ShapeFilter(mask=CAT_TERRAIN | CAT_STRUCT)
-Q_WALK = pymunk.ShapeFilter(mask=CAT_TERRAIN | CAT_STRUCT | CAT_PLATFORM | CAT_OBJECT)
+Q_WALK = pymunk.ShapeFilter(mask=CAT_TERRAIN | CAT_STRUCT | CAT_PLATFORM | CAT_OBJECT | CAT_EARTH)
 
 CT_CHAR = 1
 CT_PLATFORM = 2
@@ -122,10 +125,22 @@ class PolyWorld:
         self.space.on_collision(CT_OBJECT, None, post_solve=_impact_post)
 
     def __getstate__(self):
+        # loose earth cannot be pickled (rigid bodies): let it set into the ground first
+        e = self.__dict__.get("_earth")
+        if e is not None:
+            e.solidify_all()
         d = self.__dict__.copy()
-        for k in ("space", "loaded", "_chunk_geom", "bodies", "kinematics"):
+        for k in ("space", "loaded", "_chunk_geom", "bodies", "kinematics", "_earth"):
             d.pop(k, None)
         return d
+
+    @property
+    def earth(self):
+        e = self.__dict__.get("_earth")
+        if e is None:
+            from .earth import LooseEarth
+            e = self._earth = LooseEarth(self)
+        return e
 
     def __setstate__(self, d):
         self.__dict__.update(d)
@@ -227,13 +242,15 @@ class PolyWorld:
             self.dug = d = {}
         return d.get(cx)
 
-    def dig(self, x, y, r):
-        """Take a round bite out of the ground (a pick, a shovel, a sapper). Returns the area removed."""
+    def dig(self, x, y, r, hole=None):
+        """Take a bite out of the ground (a pick, a shovel, a sapper). Returns the area removed.
+        hole: the bite's shape (an irregular blob), else a circle of radius r."""
         from shapely.geometry import Point
         from shapely.ops import unary_union
         if getattr(self, "dug", None) is None:
             self.dug = {}
-        hole = Point(x, y).buffer(r, quad_segs=4)
+        if hole is None:
+            hole = Point(x, y).buffer(r, quad_segs=6)
         removed = 0.0
         for cx in range(int((x - r) // CHUNK_PX), int((x + r) // CHUNK_PX) + 1):
             part = hole.intersection(box(cx * CHUNK_PX, -10000, (cx + 1) * CHUNK_PX, 100000))

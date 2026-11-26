@@ -1344,6 +1344,7 @@ class Session(WorldOps):
         r.draw_decor(surf, cam, env.time, env.wind, night)
         r.draw_trees(surf, cam, env.time, env.wind)
         r.draw_objects(surf, cam)
+        self.world.earth.draw(surf, ox, oy)
         for x, y, proto, f, t in self.corpses:
             if -60 < x - ox < SW + 60:
                 pygame.draw.ellipse(surf, (60, 40, 34), (x - ox - 12, y - oy - 5, 24, 5))

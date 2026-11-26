@@ -14,6 +14,7 @@ import math
 import pygame
 
 from . import paint
+from . import figure
 
 # species: body length, withers height, hip height, chest depth, leg length, neck (len, angle), head len, shape
 SPEC = {
@@ -63,8 +64,38 @@ def ik(hip, foot, l1, l2, bend):
 _EW = [1.0]
 
 
+_ST = [None]          # the figure style in use while an animal is drawn (ink, manga...), or None
+_SC = [1.0]
+
+
+def capsule_pts(a, b, wa, wb, n=4):
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    d = math.hypot(dx, dy) or 1.0
+    ux, uy = dx / d, dy / d
+    nx, ny = -uy, ux
+    out = []
+    for i in range(n + 1):                                  # round end at b
+        t = math.pi * i / n
+        vx, vy = nx * math.cos(t) + ux * math.sin(t), ny * math.cos(t) + uy * math.sin(t)
+        out.append((b[0] + vx * wb, b[1] + vy * wb))
+    for i in range(n + 1):                                  # round end at a
+        t = math.pi * i / n
+        vx, vy = -nx * math.cos(t) - ux * math.sin(t), -ny * math.cos(t) - uy * math.sin(t)
+        out.append((a[0] + vx * wa, a[1] + vy * wa))
+    return out
+
+
 def limb(surf, a, b, wa, wb, col):
+    st = _ST[0]
+    if st is not None:
+        figure.shape(surf, capsule_pts(a, b, wa, wb), col, st, _SC[0], (wa + wb) / 2, hatch=wa > 3 * _SC[0])
+        return
     paint.soft_limb(surf, a, b, wa, wb, col, edge=_EW[0], lit=wa > 1.5 * _EW[0])
+
+
+def _ink(col):
+    st = _ST[0]
+    return st.ink if st is not None and st.ink is not None else paint.shade(col, 0.5)
 
 
 def upper(surf, root, knee, wa, wb, col):
@@ -134,6 +165,9 @@ def draw_quadruped(surf, a, cx, fy, scale=1.0):
     dn = int(8 * scale)
     canvas = paint.CANVAS.get(hw * 2 * k, (up + dn) * k)
     _EW[0] = 0.55 * scale * k
+    st = figure.current()
+    _ST[0] = st if st is not None and st.outline else None
+    _SC[0] = scale * k
     ok = _draw_quadruped(canvas, a, hw * k, up * k, scale * k)
     surf.blit(paint.shrink(canvas, k), (int(cx) - hw, int(fy) - up))
     bit = getattr(a, "_bit", None)
@@ -231,6 +265,8 @@ def _draw_quadruped(surf, a, cx, fy, scale=1.0):
                 wave = math.sin(a.anim_t * 2 + u * 2.4 + j * 0.4) * 2.2 * u
                 pts.append((tb[0] - f * (tl * (0.42 + 0.04 * o) * u + wave * S) - f * o * u * S,
                             tb[1] + tl * u * (0.95 - (0.5 if gait == "gallop" else 0.0) * u) + o * u * S))
+            if _ST[0] is not None and j == 0:
+                pygame.draw.lines(surf, _ST[0].ink, False, pts, max(2, int(S * 2.6)))
             c = paint.warm(dark, 0.25) if j in (1, 2) else (dark if j % 2 else paint.shade(dark, 0.8))
             pygame.draw.lines(surf, c, False, pts, max(1, int(S * (1.4 if j in (2, 3, 4) else 0.9))))
     else:
@@ -250,7 +286,7 @@ def _draw_quadruped(surf, a, cx, fy, scale=1.0):
             pygame.draw.polygon(surf, dark, hp)
             pygame.draw.line(surf, paint.warm(dark, 0.3), hp[3], (foot[0] - 2.4 * S, foot[1] - 0.5 * S),
                              max(1, int(S * 0.6)))
-            pygame.draw.polygon(surf, paint.shade(dark, 0.6), hp, max(1, int(_EW[0])))
+            pygame.draw.polygon(surf, _ink(paint.shade(dark, 1.2)), hp, max(1, int(_EW[0] * (1.6 if _ST[0] else 1))))
             if a.species == "horse":
                 # a little feathering over the hoof
                 for k in range(3):
@@ -285,6 +321,8 @@ def _draw_quadruped(surf, a, cx, fy, scale=1.0):
             fl = math.sin(a.anim_t * 3 + k * 0.8) * 1.2 + (2.5 if gait == "gallop" else 0)
             ang = math.atan2((2.6 - fl * 0.4) * S, -f * (3 + fl) * S)
             ln = (5.0 + 1.5 * math.sin(k * 1.7)) * S
+            if _ST[0] is not None:
+                paint.leaf(surf, _ST[0].ink, px, py, ln + S * 0.9, ang, 0.4)
             paint.leaf(surf, dark, px, py, ln, ang, 0.32)
             if k % 3 == 1:
                 paint.leaf(surf, paint.warm(dark, 0.3), px, py, ln * 0.7, ang - 0.15, 0.15)
@@ -305,9 +343,14 @@ def _draw_quadruped(surf, a, cx, fy, scale=1.0):
     body = smooth_closed(ctrl, 5)
     bc = (top_mid[0], top_mid[1] + d * 0.5)
     lx, ly = paint.LIGHT
+    st = _ST[0]
+    if st is not None:
+        # the ink look: one shaded, outlined mass (shadow crescent under the belly, ink heavier there)
+        figure.shape(surf, body, coat if not sp.get("wool") else paint.warm(coat, -0.1), st, S, d * 0.55)
     if sp.get("wool"):
-        pygame.draw.polygon(surf, paint.shade(coat, 0.55), body)
-        pygame.draw.polygon(surf, paint.warm(coat, -0.18), toward(body, bc, 0.94))
+        if st is None:
+            pygame.draw.polygon(surf, paint.shade(coat, 0.55), body)
+            pygame.draw.polygon(surf, paint.warm(coat, -0.18), toward(body, bc, 0.94))
         rng = __import__("random").Random(7)
         for k in range(46):
             u = rng.random()
@@ -316,7 +359,10 @@ def _draw_quadruped(surf, a, cx, fy, scale=1.0):
             py = top_mid[1] + d * (0.1 + 0.8 * v)
             c = paint.warm(coat, 0.18) if v < 0.4 else (coat if v < 0.75 else paint.warm(coat, -0.12))
             pygame.draw.circle(surf, c, (px, py), d * 0.2 * rng.uniform(0.8, 1.2))
-            pygame.draw.circle(surf, paint.shade(c, 0.86), (px, py), d * 0.2 * rng.uniform(0.8, 1.2), max(1, int(S * 0.3)))
+            pygame.draw.circle(surf, paint.shade(c, 0.86) if st is None else st.ink, (px, py),
+                               d * 0.2 * rng.uniform(0.8, 1.2), max(1, int(S * 0.3)))
+    elif st is not None:
+        pass
     else:
         pygame.draw.polygon(surf, paint.shade(coat, 0.5), body)
         inner = toward(body, bc, 0.95)
@@ -328,6 +374,7 @@ def _draw_quadruped(surf, a, cx, fy, scale=1.0):
             pygame.draw.polygon(surf, paint.warm(coat, 0.1), toward(body, mc, r_, lx * S, ly * S))
         pygame.draw.polygon(surf, paint.warm(coat, 0.22), toward(body, (top_mid[0], top_mid[1] + d * 0.15), 0.42,
                                                                  lx * S, ly * 2.2 * S))      # sunlit back
+    if not sp.get("wool"):
         if sp.get("patches"):
             for (px, py, r) in ((top_mid[0] - f * 2 * S, top_mid[1] + 5 * S, 5.5), (hip[0] + f * 2 * S, hip[1] + 4 * S, 3.5),
                                 (shoulder[0] - f * 1 * S, shoulder[1] + 6 * S, 3.0)):
@@ -338,7 +385,7 @@ def _draw_quadruped(surf, a, cx, fy, scale=1.0):
         rng = __import__("random").Random(int(sp["L"]))
         fur = paint.warm(coat, -0.15)
         fur2 = paint.warm(coat, 0.15)
-        for k in range(18):
+        for k in range(18 if st is None else 8):
             u = rng.uniform(0.05, 0.95)
             px = hip[0] + (shoulder[0] - hip[0]) * u
             py = top_mid[1] + d * rng.uniform(0.25, 0.85)
@@ -352,7 +399,10 @@ def _draw_quadruped(surf, a, cx, fy, scale=1.0):
         if sp.get("udder"):
             ux = hip[0] + f * 5 * S
             pygame.draw.ellipse(surf, (236, 186, 180), (ux - 3 * S, top_mid[1] + d * 1.02, 6 * S, 4 * S))
-    pygame.draw.polygon(surf, paint.shade(coat, 0.42), body, max(1, int(_EW[0] * 1.2)))
+    if st is not None:
+        pygame.draw.polygon(surf, st.ink, body, max(1, int(round(st.outline * S))))
+    else:
+        pygame.draw.polygon(surf, paint.shade(coat, 0.42), body, max(1, int(_EW[0] * 1.2)))
     # ---------------------------------------------------------------- head (over the chest)
     hl = sp["head"] * S
     ha = -0.9 + nod * 2 - grazing * 0.6 if a.species in ("horse", "deer") else -0.25 - grazing * 0.8
@@ -364,8 +414,12 @@ def _draw_quadruped(surf, a, cx, fy, scale=1.0):
     limb(surf, ne, he, hw, mz, coat)
     # the cheek (jowl) below the eye
     jc = (ne[0] + (he[0] - ne[0]) * 0.22, ne[1] + (he[1] - ne[1]) * 0.22 + hw * 0.15)
-    pygame.draw.circle(surf, paint.warm(coat, -0.12), jc, hw * 0.8)
-    pygame.draw.circle(surf, coat, (jc[0] + paint.LIGHT[0] * hw * 0.15, jc[1] + paint.LIGHT[1] * hw * 0.15), hw * 0.62)
+    if _ST[0] is None:
+        pygame.draw.circle(surf, paint.warm(coat, -0.12), jc, hw * 0.8)
+        pygame.draw.circle(surf, coat, (jc[0] + paint.LIGHT[0] * hw * 0.15, jc[1] + paint.LIGHT[1] * hw * 0.15), hw * 0.62)
+    else:
+        pygame.draw.arc(surf, _ink(coat), (jc[0] - hw * 0.7, jc[1] - hw * 0.7, hw * 1.4, hw * 1.4), 3.6, 5.6,
+                        max(1, int(S * 0.5)))
     if a.species == "horse" and getattr(a, "blaze", (int(sp["L"]) + id(a)) % 3 == 0):
         paint.capsule(surf, (ne[0] + (he[0] - ne[0]) * 0.35, ne[1] + (he[1] - ne[1]) * 0.35 - hw * 0.5),
                       (he[0] - f * S, he[1] - mz * 0.4), S * 0.9, S * 0.6, (236, 230, 220))
@@ -385,7 +439,7 @@ def _draw_quadruped(surf, a, cx, fy, scale=1.0):
     ear_l = sp["ears"] * S
     eb = (ne[0] + f * 1 * S, ne[1] - hw * 0.8)
     if sp.get("pointy") or a.species in ("horse", "deer"):
-        paint.leaf(surf, paint.shade(coat, 0.5), eb[0] + f * 0.3 * S, eb[1] + S * 0.5, ear_l + _EW[0] * 1.5,
+        paint.leaf(surf, _ink(coat), eb[0] + f * 0.3 * S, eb[1] + S * 0.5, ear_l + _EW[0] * 1.5,
                    -math.pi / 2 - f * 0.25, 0.42)
         paint.leaf(surf, paint.shade(coat, 0.92), eb[0] + f * 0.3 * S, eb[1], ear_l, -math.pi / 2 - f * 0.25, 0.38)
         paint.leaf(surf, paint.shade(dark, 1.2), eb[0] + f * 0.3 * S, eb[1] - S * 0.3, ear_l * 0.7,
@@ -393,8 +447,8 @@ def _draw_quadruped(surf, a, cx, fy, scale=1.0):
     else:
         pygame.draw.polygon(surf, paint.shade(coat, 0.85), [eb, (eb[0] - f * ear_l, eb[1] - ear_l * 0.4),
                                                             (eb[0] - f * 1 * S, eb[1] + 1.5 * S)])
-        pygame.draw.polygon(surf, paint.shade(coat, 0.5), [eb, (eb[0] - f * ear_l, eb[1] - ear_l * 0.4),
-                                                           (eb[0] - f * 1 * S, eb[1] + 1.5 * S)], max(1, int(_EW[0])))
+        pygame.draw.polygon(surf, _ink(coat), [eb, (eb[0] - f * ear_l, eb[1] - ear_l * 0.4),
+                                               (eb[0] - f * 1 * S, eb[1] + 1.5 * S)], max(1, int(_EW[0])))
     if sp.get("horns"):
         paint.capsule(surf, eb, (eb[0] + f * 3 * S, eb[1] - 4 * S), 0.9 * S, 0.4 * S, (230, 220, 196))
     if sp.get("antlers") and getattr(a, "stag", True):

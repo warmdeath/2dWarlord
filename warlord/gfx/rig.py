@@ -470,7 +470,7 @@ def draw_humanoid(surf, h, sx, sy, scale=1.0, tint=None):
     else:
         figure.draw_humanoid_styled(canvas, h, R * SSf, top * SSf, scale * SSf, tint, SSf, st)
         if st.blur and not tint:
-            canvas = pygame.transform.gaussian_blur(canvas, st.blur)
+            canvas = paint.blur(canvas, st.blur)
     small = paint.shrink(canvas, SSf)
     surf.blit(small, (int(sx) - R, int(sy) - top))
     if key is not None:

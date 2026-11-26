@@ -95,8 +95,13 @@ class PolyRenderer(SkyRenderer):
     def invalidate(self):
         w = self.world
         if w.dirty:
+            # repaint every terrain tile over (or next to) a changed chunk
+            tiles = set()
+            for c in w.dirty:
+                for tx in range(int(c * CHUNK_PX // TILE_PX) - 1, int((c + 1) * CHUNK_PX // TILE_PX) + 2):
+                    tiles.add(tx)
             for key in list(self.terrain):
-                if key[0] in w.dirty or key[0] - 1 in w.dirty or key[0] + 1 in w.dirty:
+                if key[0] in tiles:
                     self.terrain.pop(key, None)
             for c in w.dirty:
                 self._chunk_full.pop(c, None)
@@ -417,6 +422,8 @@ class PolyRenderer(SkyRenderer):
             return None
         if w.water_level(x) is not None or w.settlement_at(col) is not None:
             return None
+        if not w.terrain_solid(x, w.surface_y(x) + 3):
+            return None                     # no grass over a hole that was dug
         base = self.top_col(bio, x)
         tall_bio = bio in ("plains", "moor", "hills", "edge")
         patch = 0.5 + 0.5 * math.sin(x * 0.013 + 1.7) * math.sin(x * 0.0041)
