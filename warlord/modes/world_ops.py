@@ -116,6 +116,15 @@ class WorldOps:
                         w.stream(hf.x, 600)
         w.wind = self.env.wind
         w.step(dt)
+        w.earth.update(dt, p.mount.cx if p.mount is not None else p.cx)
+        tosses = self.__dict__.get("_tosses")
+        if tosses:
+            for tz in list(tosses):
+                tz[0] -= dt
+                if tz[0] <= 0:
+                    tosses.remove(tz)
+                    _, fx, sy, area, kind, f = tz
+                    w.earth.spawn(fx, sy, area, kind, f * 1.4, 6, lift=1.2)
         hits = getattr(w.space, "impacts", None)
         if hits:
             for e, ke in hits[:8]:
@@ -178,6 +187,10 @@ class WorldOps:
                     "streitkolben": 0.8, "flegel": 0.5}.get(key, 0.25)
             self.damage_piece(pc, dmg * mult / max(0.3, hard), by=h)
             return True
+        # loose earth: scoop it up
+        if key in ("spitzhacke", "schaufel", "hacke", "fists") and math.hypot(x - h.cx, y - h.cy) < 100 and \
+                w.earth.near(x, y, 6):
+            return self.scoop(h, x, y, key)
         # the ground itself: dig
         if w.terrain_solid(x, y) and key in ("spitzhacke", "schaufel", "hacke", "fists") and \
                 math.hypot(x - h.cx, y - h.cy) < 100:
@@ -188,7 +201,9 @@ class WorldOps:
     SOIL_DEPTH = 70.0
 
     def dig(self, h, x, y, tool):
-        """A pick or a shovel takes a round bite out of the ground; the earth goes into the bag."""
+        """A pick or a shovel takes a ragged bite out of the ground and throws the earth out as loose clods,
+        which pile up beside the hole (dig into them to scoop them into the bag)."""
+        from shapely.geometry import Polygon
         w = self.world
         depth = y - w.surface_y(x)
         rock = depth > self.SOIL_DEPTH + 26 * math.sin(x * 0.0061)
@@ -196,24 +211,37 @@ class WorldOps:
         if r <= 0:
             self.ui.toast("Solid [Fels|rock]: you need a [Spitzhacke|pickaxe].", 2)
             return True
-        area = w.dig(x, y, r)
+        # an irregular bite, a little wider than deep, ragged at the rim
+        rng = self.rng
+        n = 11
+        a0 = rng.uniform(0, math.tau)
+        pts = []
+        for i in range(n):
+            a = a0 + math.tau * i / n
+            rr = r * rng.uniform(0.78, 1.12)
+            pts.append((x + math.cos(a) * rr * 1.15, y + math.sin(a) * rr * 0.9))
+        hole = Polygon(pts).buffer(1.5, quad_segs=2)
+        area = w.dig(x, y, r, hole)
         if area <= 1:
             return False
         w.stream(self.player.cx, 2700)
         bio = w.biome_at(int(x // TILE))
+        kind = "rock" if rock else ("sand" if bio in ("coast", "ocean", "islet") else "soil")
         col = (150, 146, 140) if rock else (118, 86, 58)
-        self.fx.debris(x, y, col, 5)
+        # the earth flies off the blade, away from the digger and up out of the hole
+        if tool == "schaufel":
+            # a shovel lifts the earth out over the far rim and tosses it onto a heap beyond the hole
+            fx = x + h.facing * r * 1.1
+            sy = min(y - r * 0.3, w.surface_y(fx) - 8)
+            # the earth leaves the blade at the top of the toss, a moment after it bites
+            act = h.action if h.action is not None and h.action.get("kind") == "tool" else None
+            delay = max(0.0, act["dur"] * 0.74 - act["t"]) if act else 0.0
+            self.__dict__.setdefault("_tosses", []).append([delay, fx, sy, area, kind, h.facing])
+        else:
+            # a pick breaks it loose where it is
+            w.earth.spawn(x, y - r * 0.3, area, kind, rng.uniform(-0.4, 0.4), r * 0.6)
         self.fx.dust(x, y, 3, col)
         self.sfx("hit_stone" if rock else "dig")
-        h.dug_area = getattr(h, "dug_area", 0.0) + area
-        item = "stone" if rock else ("sand" if bio in ("coast", "ocean", "islet") else "clay" if bio == "vineyard"
-                                     else "dirt")
-        while h.dug_area >= 380:
-            h.dug_area -= 380
-            if h is self.player and self.player.inv.add(item, 1):
-                self.drop_item(item, 1, x, y - 8)
-            elif h is self.player:
-                self.pickup_text(item, 1)
         # ore next to the bite?
         for ore in w.ores:
             if ore["left"] > 0 and abs(ore["x"] - x) < r + 10 and abs(ore["y"] - y) < r + 10:
@@ -222,6 +250,25 @@ class WorldOps:
         self.check_footing(x, y, r)
         if h is self.player:
             self.emit("dig", x=x, y=y)
+        return True
+
+    def scoop(self, h, x, y, tool):
+        """Dig into loose earth: the clods go into the bag (380 units of area make one load)."""
+        w = self.world
+        r = {"schaufel": 16, "spitzhacke": 9, "hacke": 11, "fists": 7}.get(tool, 8)
+        area, kind = w.earth.take(x, y, r)
+        if area <= 0:
+            return False
+        bio = w.biome_at(int(x // TILE))
+        item = "stone" if kind == "rock" else ("sand" if kind == "sand" else ("clay" if bio == "vineyard" else "dirt"))
+        h.dug_area = getattr(h, "dug_area", 0.0) + area
+        while h.dug_area >= 380:
+            h.dug_area -= 380
+            if h is self.player and self.player.inv.add(item, 1):
+                self.drop_item(item, 1, x, y - 8)          # the bag is full: it lands at your feet
+            elif h is self.player:
+                self.pickup_text(item, 1)
+        self.sfx("dig")
         return True
 
     def check_footing(self, x, y, r):
@@ -273,7 +320,7 @@ class WorldOps:
         if pc is not None:
             v = "break_wood" if MATS[pc.mat].flammable else "break"
             return v, self.TOOL_PREF[v], (x, y)
-        if w.terrain_solid(x, y):
+        if w.earth.near(x, y, 6) or w.terrain_solid(x, y):
             return "dig", self.TOOL_PREF["dig"], (x, y)
         return None
 
@@ -885,15 +932,16 @@ class WorldOps:
         if d is None or not p.inv.count(key):
             return None
         if d.place == "fill" or (key in ("stone", "sand", "clay") and self.world.in_cave(x, y)):
-            if self.world.fill(x, y, 12) > 5:
-                self.world.stream(self.player.cx, 2700)
-                p.inv.remove(key, 1)
-                self.sync_held()
-                self.fx.dust(x, y, 3, (118, 86, 58))
-                self.sfx("dig")
-                return True
-            self.ui.toast("[Erde|earth] goes back into a hole you dug.", 2)
-            return None
+            # empty a load of earth: loose clods that fall, settle and later set into the ground
+            if self.world.terrain_solid(x, y) or PF.piece_at(self.world, x, y, solid_only=True):
+                self.ui.toast("Tip the [Erde|earth] out where there is room.", 2)
+                return None
+            kind = "rock" if key == "stone" else "sand" if key == "sand" else "soil"
+            self.world.earth.spawn(x, y, 380, kind, 0.0, 6)
+            p.inv.remove(key, 1)
+            self.sync_held()
+            self.sfx("dig")
+            return True
         if d.place == "seed":
             if self.sow(x, key):
                 p.inv.remove(key, 1)

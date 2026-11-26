@@ -44,7 +44,8 @@ pip install pygame-ce numpy pymunk shapely
 python main.py
 ```
 
-Python 3.10+. Classic `pygame` 2.x also works. F11 toggles fullscreen, F3 shows the frame rate.
+Python 3.10+. Classic `pygame` 2.x also works (the soft blurs fall back to a scale-down/scale-up when
+`pygame.transform.gaussian_blur` is missing). F11 toggles fullscreen, F3 shows the frame rate.
 
 ## Three ways to play
 
@@ -61,14 +62,14 @@ Python 3.10+. Classic `pygame` 2.x also works. F11 toggles fullscreen, F3 shows 
 | Key | Action |
 |---|---|
 | A / D, Shift, S, Space, W | walk, run, crouch (run + crouch = slide), jump, climb / swim up |
-| Left mouse / J | attack — the move depends on your state (see Combat) |
+| Left mouse / J | attack **toward the cursor**: point high for an overhead cut, level for a slash or thrust, low for a low cut; the blow lands at the height you aim (see Combat) |
 | Hold left mouse on the world | **fell a tree** (point anywhere on it while standing next to it), **cut a trunk**, **dig** into the ground (straight down if you like), mine ore, break walls — the right tool from your bag is taken automatically, and a hint above the belt says what will happen |
-| Bow | **mouse:** point, hold left to draw, release; a dotted arc shows where the arrow will fly · **keys:** hold J to draw, W/S raise and lower the bow (Shift for fine aim), A/D turn, release J to shoot · crossbow: hold J to aim, release to loose |
+| Bow | **mouse:** point, hold left to draw, release; a dotted arc shows where the arrow will fly · **keys:** hold J to draw, W/S raise and lower the bow (Shift for fine aim), A/D turn, release J to shoot · crossbow: hold J to aim, release to loose · arrows strike whatever they touch along their flight (head, body, limbs, a beast's neck or flank) |
 | Right mouse / K | block — tap it just before a hit lands to **parry** |
 | E | pick up (small things go in the bag, big ones into your arms) · set down · doors and gates · chests · beds · **Werkbank** · talk · mount · board · harvest · pray · signposts · winch · pitch |
 | Carrying | left click: set it down where you point · **Shift + click: fix it in place** (a door in a frame, stakes as a barrier, a plank bridge, a ladder) · R rotate · G throw |
 | C | **shape the log at your feet**: Q / E choose a form, drag axe strokes along the dashed lines, Enter when done |
-| 1–4 / mouse wheel | belt · Q drop · T cycle shield / armour / helmet · V fire arrows · click with a Verband to bind wounds, with a Hacke to till, with Mist to manure, with a Sichel to reap, with Erde to fill a hole |
+| 1–4 / mouse wheel | belt · Q drop · T cycle shield / armour / helmet · V fire arrows · click with a Verband to bind wounds, with a Hacke to till, with Mist to manure, with a Sichel to reap, with Erde to tip out earth |
 | I · B · M · N · R | the Rucksack & crafting · blueprints · world map · Wörterbuch (Q = quiz) · Ständeordnung |
 | X · Tab · Z | formation orders · select formation · commander's zoomed-out view |
 | F5 / F9 · Esc · H | save / load · pause · help |
@@ -101,8 +102,13 @@ Python 3.10+. Classic `pygame` 2.x also works. F11 toggles fullscreen, F3 shows 
   - **Break structures.** Hammers and picks bite into walls, axes into timber; trebuchet stones and rams knock
     pieces out.
   - **Place what you made**, loose (it falls and settles) or fixed in place.
-  - **Dig.** A Schaufel (shovel) bites quickly into earth, a Spitzhacke into rock; the earth goes into your bag
-    and can be thrown back into a hole. Dig under a wall and it loses its footing.
+  - **Dig.** A Schaufel (shovel) takes ragged bites out of the earth, a Spitzhacke out of rock. The shovel lifts
+    the earth out over the far rim onto a heap of loose clods (grey stones from rock); a pick breaks it loose
+    where it is. Clods are real little bodies: they tumble, pile up, and you can walk on the heap. Dig into a
+    heap to scoop it into your bag; use Erde from the bag to tip clods out again. Loose earth only lasts while
+    you are near: walk on (about a screen and a half) and it sets into solid ground, filling the holes it lies
+    in and raising a grassy mound where it is heaped, with the same amount of earth. Dig under a wall and it
+    loses its footing.
   - **Go underground** with a torch and a pick.
 - **Shaping wood (procedural crafting).** You don't choose "door" from a menu; you cut one out of a piece of
   wood. A Werkstück is a polygon. *In the field*, press C at a log: the target shape is laid over it as dashed
@@ -173,7 +179,9 @@ upper left.
   hair and beards in strands; cloth that folds below the belt, a neckline, a buckle and a purse; mail in rows of
   rings, plate that gleams; painted helmets and shields. Limbs are soft capsules with a cool shadow on one side
   and a warm highlight on the other, outlined in a darker shade of their own colour, never black.
-- **Animals.** Smooth bodies drawn through their skeleton points, a shaded belly, muscles that catch the light
+- **Animals.** In the ink look (the default) animals and horses match the people: inked outlines heavier on
+  the shadow side, a hard shadow under the belly, ink-rimmed manes, tails, ears and hooves. Underneath that:
+  smooth bodies drawn through their skeleton points, a shaded belly, muscles that catch the light
   over shoulder and haunch, fur strokes along the lie of the coat; manes and tails in flowing locks that lift
   in the gallop; eyes, nostrils and mouths; a blaze on some horses, feathering over the hooves; saddle and
   bridle in leather.
@@ -256,11 +264,23 @@ upper left.
 
 | State | Move |
 |---|---|
-| standing | 3-hit combo: cut, backswing, heavy overhead |
+| standing | aimed with the mouse: high = overhead, level = cut / backswing (or thrust), low = low cut; a spear, pike, lance or pitchfork is always **thrust** along the line you aim — high, level or low — drawn back in both hands and driven out along its own shaft; with J alone the 3-hit combo: cut, backswing, heavy overhead |
 | running | lunge / charge |
 | crouching | low sweep, or a **Konter** (riposte) right after a successful block |
 | in the air | plunging strike |
 | on horseback | couched lance / riding slash, damage grows with speed |
+
+With a weapon drawn you face the cursor (and back-pedal if you walk away from it); the point of your blade
+follows the mouse en garde, each blow bends toward where you aim and strikes at that height (head, body or
+legs).
+
+**Working motions.** Every tool has its own motion, aimed at the point under the cursor, and the arms and
+tool are solved so the head of the tool lands right there: the **shovel** is set, driven in, levered back and
+the earth tossed off the blade onto a heap; the **pick** and the **hoe** come down from over the head; the
+**axe** chops a standing tree from the side at the height you point and splits a lying trunk with downward
+strokes; the **hammer** knocks; the **sickle** sweeps low through the stalks; things you set down are
+reached for and placed. The blow, the bite or the cut happens at the moment of impact in the motion, and the
+shield is slung on the back while both hands are on a tool.
 
 Blocking costs stamina and posture. A **parry** (block in the last instant) staggers the attacker for free.
 Crouching makes you a smaller target: high swings pass over you.

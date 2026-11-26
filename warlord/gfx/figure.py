@@ -338,6 +338,8 @@ def draw_humanoid_styled(surf, h, sx, sy, scale, tint, ss, st):
             R._draw_shield(surf, h, (hip[0] - f * 11 * S, hip[1] + 10 * S), f, S * 0.9, raised=False)
             pygame.draw.line(surf, (70, 46, 28), (hip[0] - f * 6 * S, hip[1] + 1 * S),
                              (hip[0] - f * 11 * S, hip[1] + 5 * S), max(1, int(S * 0.6)))
+        elif h.action is not None and h.action.get("kind") == "tool":
+            R._draw_shield(surf, h, (sh[0] - f * 4 * S, sh[1] + 6 * S), f, S * 0.9, raised=False)
         else:
             R._draw_shield(surf, h, J["hb"], f, S, raised=False)
     # -------------------------------------------------- torso

@@ -221,7 +221,7 @@ def paint_tree(t, season):
             tp = [paint.shade(c, k) for c in npal]
             paint.paint_needles(tgt, (apex, tl, tr, sag * S), tp, rng, snow)
         for tgt in (lower, front):
-            soft = pygame.transform.gaussian_blur(tgt, 1)
+            soft = paint.blur(tgt, 1)
             tgt.fill((0, 0, 0, 0))
             tgt.blit(soft, (0, 0))
         return _finish(wood, [(lower, 0.6), (front, 1.0)], ox, oy, W, Ht, back_first=False)
