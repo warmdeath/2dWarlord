@@ -264,7 +264,7 @@ upper left.
 
 | State | Move |
 |---|---|
-| standing | aimed with the mouse: high = overhead, level = cut / backswing (or thrust), low = low cut; with J alone the 3-hit combo: cut, backswing, heavy overhead |
+| standing | aimed with the mouse: high = overhead, level = cut / backswing (or thrust), low = low cut; a spear, pike, lance or pitchfork is always **thrust** along the line you aim — high, level or low — drawn back in both hands and driven out along its own shaft; with J alone the 3-hit combo: cut, backswing, heavy overhead |
 | running | lunge / charge |
 | crouching | low sweep, or a **Konter** (riposte) right after a successful block |
 | in the air | plunging strike |

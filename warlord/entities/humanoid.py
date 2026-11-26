@@ -175,7 +175,11 @@ class Humanoid(Body):
             dx = max(6.0, (ap[0] - self.cx) * self.facing)
             dy = ap[1] - (self.y + 12)
             aim = max(-1.3, min(1.1, math.atan2(dy, dx)))
-            if mv is not moves.get("run"):
+            if mv is not moves.get("run") and "polearm" in wd.flags and wd.style != "halberd":
+                # a spear is thrust wherever it points: high, level or low
+                thrusts = [m for m in moves["combo"] if m.arc in ("thrust", "stab")] or moves["combo"]
+                mv = thrusts[(self.combo - 1) % len(thrusts)]
+            elif mv is not moves.get("run"):
                 combo = moves["combo"]
                 level = [m for m in combo if m.arc in ("swing", "backswing", "thrust", "stab")] or combo
                 high = [m for m in combo if m.arc == "overhead"]

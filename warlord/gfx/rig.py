@@ -165,6 +165,13 @@ def compute_pose(h):
             p.uaf, p.faf = 0.9, 0.85
             p.uab, p.fab = 0.7, 1.2
             p.wa = -0.25 if st not in ("run",) else -0.05
+            ap = getattr(h, "aim_pt", None)
+            if ap is not None and st != "run" and h.mount is None:
+                # the point follows the cursor, the shaft held low and back in both hands
+                a = max(-1.2, min(0.9, _aim_angle(h, p, ap)))
+                p.wa = a
+                p.uaf, p.faf = math.pi / 2 - a - 0.75, 1.25
+                p.uab, p.fab = p.uaf - 0.45, 1.5
             if getattr(h, "formation_stance", None) == "igel":
                 p.wa = -0.18
                 p.uaf, p.faf = 0.7, 1.0
@@ -227,6 +234,25 @@ def compute_pose(h):
             if arc == "overhead" and ph == 1:
                 p.lean = max(p.lean, 0.25)
             aim = act.get("aim")
+            if aim is not None and pole and arc in ("thrust", "stab"):
+                # a true thrust: the shaft keeps its angle (where you aim); both hands draw it back along
+                # its line, then drive it forward, the body leaning into it
+                pull = k if ph == 0 else 0.0
+                along = math.pi / 2 - aim                         # the arm pointing down the shaft
+                p.wa = aim
+                if ph == 0:
+                    p.uaf, p.faf = along - 0.75 - 0.9 * pull, 1.25 + 1.0 * pull       # draw the shaft right back
+                elif ph == 1:
+                    p.uaf, p.faf = along - 1.65 + 1.65 * k, 2.25 - 2.25 * k           # drive it out along its line
+                else:
+                    p.uaf, p.faf = along - 0.75 * k, 1.25 * k                          # and back to the guard
+                p.uab, p.fab = p.uaf - 0.45, min(2.4, p.faf + 0.35)
+                drive = k if ph == 1 else (1 - k if ph == 2 else 0.0)
+                p.lean = max(-0.15, 0.1 + 0.4 * drive - 0.3 * pull)
+                if not p.rot:
+                    p.thf = max(p.thf, 0.15 + 0.45 * drive)
+                    p.thb = min(p.thb, -0.1 - 0.35 * drive)
+                aim = None
             if aim is not None:
                 # the blow bends toward where you aimed
                 if arc in ("swing", "backswing", "thrust", "stab"):
