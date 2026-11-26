@@ -18,8 +18,9 @@ from ..gfx.renderer import Renderer as SkyRenderer, Camera, lerp_col  # noqa: F4
 from .materials import MATS
 from .world import CHUNK_PX
 from . import flora
+from ..gfx import paint
 
-TILE_PX = 512
+TILE_PX = 256
 
 
 def shade(c, f):
@@ -46,7 +47,7 @@ SOIL = {"abyss": (100, 84, 66), "edge": (112, 88, 64), "plains": (118, 86, 58), 
         "coast": (196, 176, 122), "ocean": (186, 166, 116), "islet": (198, 180, 126), "snow": (116, 92, 70),
         "ashland": (166, 140, 106), "volcanic": (70, 64, 66), "lavasea": (58, 52, 54)}
 ROCK = {"abyss": (110, 102, 98), "ashland": (150, 128, 100), "volcanic": (64, 60, 66), "lavasea": (54, 50, 56)}
-ROCK_DEFAULT = (118, 114, 110)
+ROCK_DEFAULT = (108, 102, 96)
 SEASON_TOP = {"herbst": {"plains": (150, 146, 66), "forest": (124, 120, 56), "hills": (140, 140, 70)},
               "fruehling": {"plains": (110, 170, 70), "forest": (86, 146, 60), "hills": (118, 168, 74)}}
 ORE = {"coal": (34, 32, 34), "iron": (160, 98, 74), "silver": (210, 214, 224), "gold": (236, 196, 70),
@@ -66,7 +67,7 @@ class PolyRenderer(SkyRenderer):
         self.world = world
         self.terrain = OrderedDict()
         self.liquid = {}
-        self.max_chunks = 160
+        self.max_chunks = 400
         self._build_parallax()
         self.stars = [(random.random(), random.random() * 0.6, random.random()) for _ in range(140)]
         self.clouds = [[random.uniform(0, 4000), random.uniform(20, 240), random.uniform(80, 220),
@@ -79,6 +80,9 @@ class PolyRenderer(SkyRenderer):
         self._chunk_full = {}
         self.time = 0.0
         self.wind = 0.0
+        # build the paint textures up front (a fraction of a second, once)
+        paint.noise(512, 11), paint.noise(384, 12, (6, 12, 24, 48, 96)), paint.noise(256, 13, (8, 16, 32, 64, 128))
+        paint.noise(128, 14, (16, 32, 64, 128)), paint.noise(512, 15), paint.noise(512, 16)
 
     # ------------------------------------------------------------------ caches
     def set_season(self, season):
@@ -109,94 +113,157 @@ class PolyRenderer(SkyRenderer):
 
     # ------------------------------------------------------------------ terrain tiles
     def _render_tile(self, tx, ty):
+        """One 512 px terrain tile, painted per pixel: a turf lip, crumbly soil with humus, pebbles and roots,
+        then rock in tilted strata with cracks, darkening with depth; cave hollows with shadowed back walls,
+        lit floors and dark ceilings."""
         w = self.world
         X, Y = tx * TILE_PX, ty * TILE_PX
         i0 = max(0, int(X // TILE) - 1)
         i1 = min(w.w, int((X + TILE_PX) // TILE) + 2)
         if i1 <= i0:
             return None
-        top = w.top[i0:i1 + 1]
-        bot = w.bottom[i0:i1 + 1]
-        if float(top.min()) > Y + TILE_PX + 2 or float(bot.max()) < Y - 2:
+        if float(w.top[i0:i1 + 1].min()) > Y + TILE_PX + 2 or float(w.bottom[i0:i1 + 1].max()) < Y - 2:
             return None
-        surf = pygame.Surface((TILE_PX, TILE_PX), pygame.SRCALPHA)
-        xs = [i * TILE - X for i in range(i0, i1 + 1)]
-        ts = [float(t) - Y for t in top]
-        bs = [float(b) - Y for b in bot]
-        n = len(xs)
-        # split into runs where the crust exists
-        runs, run = [], []
-        for k in range(n):
-            if bs[k] - ts[k] > 2:
-                run.append(k)
-            elif run:
-                runs.append(run)
-                run = []
-        if run:
-            runs.append(run)
-        for r in runs:
-            if len(r) < 2:
-                continue
-            for a, b in zip(r, r[1:]):
-                px = (xs[a] + xs[b]) / 2 + X
-                bio = self.biome(px)
-                rock = ROCK.get(bio, ROCK_DEFAULT)
-                soil = SOIL.get(bio, SOIL["plains"])
-                topc = self.top_col(bio, px)
-                xa, xb = xs[a], xs[b]
-                ta, tb = ts[a], ts[b]
-                ba, bb = bs[a], bs[b]
-                sd_a = soil_depth((a + i0) * TILE, bio)
-                sd_b = soil_depth((b + i0) * TILE, bio)
-                # rock column
-                pygame.draw.polygon(surf, rock, [(xa, ta), (xb, tb), (xb, bb), (xa, ba)])
-                # soil band (faceted: two triangles per column with slightly different shades)
-                sa, sb = min(ba, ta + sd_a), min(bb, tb + sd_b)
-                f1 = 0.94 + hf(a + i0, 7) * 0.1
-                pygame.draw.polygon(surf, shade(soil, f1), [(xa, ta), (xb, tb), (xb, sb)])
-                pygame.draw.polygon(surf, shade(soil, f1 * 0.94), [(xa, ta), (xb, sb), (xa, sa)])
-                # turf
-                gd = 7 if bio != "snow" else 9
-                pygame.draw.polygon(surf, topc, [(xa, ta), (xb, tb), (xb, tb + gd), (xa, ta + gd)])
-                pygame.draw.line(surf, shade(topc, 1.15), (xa, ta), (xb, tb), 2)
-                pygame.draw.line(surf, shade(topc, 0.78), (xa, ta + gd), (xb, tb + gd), 1)
-                # pebbles in the soil
-                if hf(a + i0, 11) < 0.35:
-                    px_ = xa + hf(a + i0, 12) * 16
-                    py_ = ta + 14 + hf(a + i0, 13) * (sd_a - 18)
-                    pygame.draw.ellipse(surf, shade(rock, 0.95), (px_, py_, 5, 3))
-            # crust underside seen from the void
-            under = [(xs[k], bs[k]) for k in r]
-            if len(under) > 1:
-                pygame.draw.lines(surf, (40, 32, 30), False, under, 3)
-        # rock facets and strata (a jittered triangle mesh, a few shades)
-        step = 48
-        gx0 = int(X // step) - 1
-        gy0 = int(Y // step) - 1
-        pts = {}
-        for gi in range(gx0, gx0 + TILE_PX // step + 3):
-            for gj in range(gy0, gy0 + TILE_PX // step + 3):
-                pts[gi, gj] = (gi * step + (hf(gi, gj, 1) - 0.5) * 30 - X, gj * step + (hf(gi, gj, 2) - 0.5) * 30 - Y)
-        for gi in range(gx0, gx0 + TILE_PX // step + 2):
-            for gj in range(gy0, gy0 + TILE_PX // step + 2):
-                a, b, c, d = pts[gi, gj], pts[gi + 1, gj], pts[gi + 1, gj + 1], pts[gi, gj + 1]
-                for tri, k in (((a, b, c), 0), ((a, c, d), 1)):
-                    ok = True
-                    for (vx, vy) in tri:
-                        col = int((vx + X) // TILE)
-                        if not (0 <= col < w.w) or vy + Y < w.top[col] + 90 or vy + Y > w.bottom[col] - 4:
-                            ok = False
-                            break
-                    if not ok:
-                        continue
-                    bio = self.biome(tri[0][0] + X)
-                    rock = ROCK.get(bio, ROCK_DEFAULT)
-                    depth = (tri[0][1] + Y - w.top[int((tri[0][0] + X) // TILE)]) / 800.0
-                    f = (0.88 + hf(gi, gj, k, 5) * 0.16) * (1.0 - min(0.25, depth * 0.12))
-                    pygame.draw.polygon(surf, shade(rock, f), tri)
-        # cave hollows
-        self._draw_caves(surf, tx, ty)
+        P = TILE_PX
+        xs = X + np.arange(P, dtype=np.float32)
+        cols = np.arange(w.w + 1, dtype=np.float32) * TILE
+        top = np.interp(xs, cols, w.top).astype(np.float32)
+        bot = np.interp(xs, cols, w.bottom).astype(np.float32)
+        r0 = int(max(0, min(P, float(top.min()) - Y - 2)))
+        r1 = int(max(0, min(P, float(bot.max()) - Y + 2)))
+        if r1 <= r0:
+            return None
+        PY = r1 - r0                                             # only the rows that hold ground
+        ys = Y + r0 + np.arange(PY, dtype=np.float32)
+        depth = ys[:, None] - top[None, :]                       # [y, x]
+        inside = (depth >= 0) & (ys[:, None] <= bot[None, :])
+        if not inside.any():
+            return None
+        # per-column colours from the biome
+        ncol = int(np.ceil(P / TILE)) + 1
+        c0 = int(X // TILE)
+        tc, sc, rc, sd = [], [], [], []
+        for c in range(c0, c0 + ncol):
+            bio = w.biome_at(min(max(c, 0), w.w - 1))
+            tc.append(self.top_col(bio, c * TILE))
+            sc.append(SOIL.get(bio, SOIL["plains"]))
+            rc.append(ROCK.get(bio, ROCK_DEFAULT))
+            sd.append(30.0 if bio in ("ocean", "coast", "islet") else -1.0)
+        idx = ((xs // TILE).astype(int) - c0).clip(0, ncol - 1)
+        tc = np.array(tc, dtype=np.float32)[idx]
+        sc = np.array(sc, dtype=np.float32)[idx]
+        rc = np.array(rc, dtype=np.float32)[idx]
+        sdv = np.array(sd, dtype=np.float32)[idx]
+        soil_d = np.where(sdv > 0, sdv, 70 + 26 * np.sin(xs * 0.0061) + 14 * np.sin(xs * 0.023 + 1.3) +
+                          6 * np.sin(xs * 0.071)).astype(np.float32)
+        # textures
+        Yr = Y + r0
+        n1 = paint.noise_window(paint.noise(512, 11), X, Yr, P, PY)
+        n2 = paint.noise_window(paint.noise(384, 12, (6, 12, 24, 48, 96)), X, Yr, P, PY)
+        n3 = paint.noise_window(paint.noise(256, 13, (8, 16, 32, 64, 128)), X, Yr, P, PY)
+        fine = paint.noise_window(paint.noise(128, 14, (16, 32, 64, 128)), X, Yr, P, PY)
+        # horizontal streaks: noise stretched sideways
+        sx_ = ((np.arange(P) + int(X)) // 5) % 512
+        sy_ = (np.arange(PY) + int(Yr)) % 512
+        streak = paint.noise(512, 15)[sy_][:, sx_]
+        turf_d = 6.0 + 4.0 * paint.noise_window(paint.noise(512, 16), X, 0, P, 1)
+        soil_edge = soil_d[None, :] + (n2 - 0.5) * 34
+        # rock: strata tilt gently, cracks follow a ridged noise, darker with depth
+        band = np.sin((ys[:, None] + xs[None, :] * 0.08 + n1 * 90) * 0.07)
+        rock_k = 0.84 + 0.1 * n2 + 0.05 * band + 0.07 * (fine - 0.5)
+        ridge = 1 - np.abs(n3 * 2 - 1)
+        crack = (ridge > 0.965) & (n1 > 0.45)
+        rock_k = np.where(crack, rock_k * 0.72, rock_k)
+        # the lower lip of a crack catches light
+        rock_k = np.where(np.roll(crack, 2, axis=0) & ~crack, rock_k * 1.08, rock_k)
+        deep = np.clip((depth - soil_d[None, :]) / 1600.0, 0, 0.4)
+        rock_k *= (1 - deep)
+        tint = 1 + 0.06 * band[..., None] * np.array([1.0, 0.2, -0.8], dtype=np.float32)
+        rock_col = rc[None, :, :] * rock_k[..., None] * tint
+        # soil: crumbly, darker toward the rock and in the humus right under the turf
+        soil_k = 0.86 + 0.2 * (n1 - 0.5) + 0.12 * (streak - 0.5) + 0.1 * (fine - 0.5)
+        soil_k *= 1.0 - 0.2 * np.clip(depth / np.maximum(soil_d[None, :], 1), 0, 1)
+        humus = np.clip(1 - (depth - turf_d) / 9.0, 0, 1)
+        soil_k *= 1 - 0.22 * humus
+        soil_col = sc[None, :, :] * soil_k[..., None]
+        # pebbles in the soil: blobs of the noise, lit on top
+        peb = (fine > 0.86) & (depth > turf_d + 8)
+        lit = fine - np.roll(fine, 2, axis=0) > 0.015
+        pc = rc[None, :, :] * (0.72 + 0.28 * lit[..., None])
+        soil_col = np.where(peb[..., None], pc, soil_col)
+        # turf: bright at the lip, darkening into the roots
+        tk = np.clip(depth / turf_d, 0, 1)
+        turf_col = tc[None, :, :] * (1.12 - 0.42 * tk[..., None]) * (0.92 + 0.16 * fine[..., None])
+        lip = depth < 1.6
+        turf_col = np.where(lip[..., None], tc[None, :, :] * 1.22 + 8, turf_col)
+        e = depth - soil_edge
+        blend = np.clip(e / 5.0 + 0.5, 0, 1)[..., None]
+        rgb = soil_col * (1 - blend) + rock_col * blend
+        rgb = np.where((np.abs(e) < 1.5)[..., None], rgb * 0.7, rgb)       # a dark seam between soil and rock
+        is_turf = (depth < turf_d)[..., None]
+        rgb = np.where(is_turf, turf_col, rgb)
+        alpha = inside.astype(np.uint8) * 255
+        # caves and dug hollows
+        mask = self._cave_mask(tx, ty)
+        if mask is not None:
+            mask = mask[r0:r1]
+            m = mask > 0
+            small = pygame.transform.smoothscale(pygame.surfarray.make_surface(np.repeat(mask.T[:, :, None], 3, 2)),
+                                                 (P // 8, max(1, PY // 8)))
+            blur = pygame.surfarray.array3d(pygame.transform.smoothscale(small, (P, PY)))[:, :, 0].T / 255.0
+            back = rc[None, :, :] * (0.2 + 0.2 * blur[..., None]) * (0.85 + 0.3 * n2[..., None])
+            floor = (~m) & np.roll(m, 1, axis=0) & np.roll(m, 3, axis=0)
+            ceil = (~m) & np.roll(m, -1, axis=0) & np.roll(m, -3, axis=0)
+            rim = (~m) & (blur > 0.02)
+            rgb = np.where(rim[..., None], rgb * (0.7 + 0.3 * (1 - blur[..., None])), rgb)
+            rgb = np.where(m[..., None], back, rgb)
+            rgb = np.where(floor[..., None], rgb * 1.45 + 6, rgb)
+            rgb = np.where(ceil[..., None], rgb * 0.55, rgb)
+            alpha = np.where(m, 255, alpha).astype(np.uint8)
+        rgb = np.clip(rgb, 0, 255).astype(np.uint8)
+        surf = pygame.Surface((P, P), pygame.SRCALPHA)
+        rgbs = pygame.surfarray.make_surface(rgb.transpose(1, 0, 2))
+        surf.blit(rgbs, (0, r0))
+        pa = pygame.surfarray.pixels_alpha(surf)
+        pa[:] = 0
+        pa[:, r0:r1] = alpha.T
+        del pa
+        # the crust's underside seen from the void
+        n = i1 - i0 + 1
+        under = [(i * TILE - X, float(w.bottom[i]) - Y) for i in range(i0, i1 + 1)]
+        tops = [float(w.top[i]) for i in range(i0, i1 + 1)]
+        run = [p for p, t in zip(under, tops) if p[1] + Y - t > 2]
+        if len(run) > 1 and n > 1:
+            pygame.draw.lines(surf, (40, 32, 30), False, run, 3)
         return surf
+
+    def _cave_mask(self, tx, ty):
+        """An 8-bit mask [y, x] of cave hollows inside this tile, or None."""
+        X, Y = tx * TILE_PX, ty * TILE_PX
+        ms = None
+        for cx in range(int(X // CHUNK_PX), int((X + TILE_PX) // CHUNK_PX) + 1):
+            g = self._cave_bg(cx)
+            if g is None or g.is_empty:
+                continue
+            for p in getattr(g, "geoms", [g]):
+                if p.geom_type != "Polygon":
+                    continue
+                bx0, by0, bx1, by1 = p.bounds
+                if bx1 < X or bx0 > X + TILE_PX or by1 < Y or by0 > Y + TILE_PX:
+                    continue
+                if ms is None:
+                    ms = pygame.Surface((TILE_PX, TILE_PX), depth=8)
+                    ms.fill(0)
+                ext = [(x - X, y - Y) for x, y in p.exterior.coords]
+                if len(ext) >= 3:
+                    pygame.draw.polygon(ms, 255, ext)
+                for hole in p.interiors:
+                    hp = [(x - X, y - Y) for x, y in hole.coords]
+                    if len(hp) >= 3:
+                        pygame.draw.polygon(ms, 0, hp)
+        if ms is None:
+            return None
+        return pygame.surfarray.array2d(ms).T.astype(np.uint8)
 
     def _cave_bg(self, cx):
         """The cave interiors within one x-chunk: ground-without-caves minus ground-with-caves."""
@@ -278,6 +345,27 @@ class PolyRenderer(SkyRenderer):
             self.terrain.move_to_end(key)
         return t
 
+    def prewarm(self, cam, SW, SH, budget=0.006):
+        """Paint what is about to scroll into view (terrain tiles, then trees) within a small time budget per
+        frame, so walking or riding into new country does not stutter."""
+        import time as _t
+        t0 = _t.perf_counter()
+        ox, oy = cam.offset()
+        tx0, tx1 = int((ox - TILE_PX) // TILE_PX), int((ox + SW + TILE_PX) // TILE_PX)
+        ty0, ty1 = int((oy - TILE_PX * 0.5) // TILE_PX), int((oy + SH + TILE_PX * 0.5) // TILE_PX)
+        cx = (tx0 + tx1) / 2
+        for tx in sorted(range(tx0, tx1 + 1), key=lambda t: abs(t - cx)):
+            for ty in range(ty0, ty1 + 1):
+                if (tx, ty) not in self.terrain:
+                    self.get_tile(tx, ty)
+                    if _t.perf_counter() - t0 > budget:
+                        return
+        for t in self.world.near("tree_chunks", ox - 700, ox + SW + 700):
+            if t.state == "stand" and not flora.has_sprites(t, self.season):
+                flora.sprites(t, self.season)
+                if _t.perf_counter() - t0 > budget:
+                    return
+
     def draw_terrain(self, surf, cam):
         SW, SH = surf.get_size()
         self.invalidate()
@@ -318,26 +406,50 @@ class PolyRenderer(SkyRenderer):
 
     # ------------------------------------------------------------------ ground cover (live, sways)
     def draw_grass(self, surf, cam, time, wind):
+        """Tufts of grass along the turf: a few curved blades each, darker at the root, sunlit at the tip;
+        patches of tall meadow grass come and go along the ground."""
         SW, SH = surf.get_size()
         ox, oy = cam.offset()
         w = self.world
-        x = int(ox // 6) * 6
-        while x < ox + SW:
+        if self.season == "winter":
+            return
+        step = 4
+        x = int(ox // step) * step - step
+        gust = wind * 2.2
+        tall_bio = ("plains", "moor", "hills", "edge")
+        draw_lines = pygame.draw.lines
+        while x < ox + SW + step:
             col = int(x // TILE)
             if 0 <= col < w.w:
                 bio = w.biome_at(col)
-                if bio in ("plains", "forest", "hills", "vineyard", "moor", "mountains", "coast", "edge") and \
-                        self.season != "winter":
+                if bio in ("plains", "forest", "hills", "vineyard", "moor", "mountains", "coast", "edge"):
                     y = w.surface_y(x) - oy
                     if -30 < y < SH + 10 and w.water_level(x) is None and w.settlement_at(col) is None:
-                        hh = 4 + hf(x, 17) * (9 if bio in ("plains", "moor", "hills") else 6)
-                        c = shade(self.top_col(bio, x), 0.85 + hf(x, 18) * 0.35)
-                        sw = math.sin(time * 2.0 + x * 0.05) * (1.0 + abs(wind) * 2.5) + wind * 2
-                        pygame.draw.line(surf, c, (x - ox, y + 2), (x - ox + sw, y - hh), 1)
-                        if hf(x, 19) < 0.5:
-                            pygame.draw.line(surf, shade(c, 0.9), (x - ox + 2, y + 2), (x - ox + 3 + sw * 0.8,
-                                                                                         y - hh * 0.7), 1)
-            x += 6
+                        base = self.top_col(bio, x)
+                        patch = 0.5 + 0.5 * math.sin(x * 0.013 + 1.7) * math.sin(x * 0.0041)
+                        hmax = (5 + (13 if bio in tall_bio else 7) * patch) * (0.6 if bio == "coast" else 1.0)
+                        nb = 2 + int(hf(x, 21) * 3)
+                        for b in range(nb):
+                            r1 = hf(x, b, 17)
+                            bx = x - ox + (b - nb / 2) * 1.3 + r1
+                            hh = hmax * (0.45 + 0.55 * hf(x, b, 23))
+                            sw = (math.sin(time * 2.0 + x * 0.05 + b) * (0.8 + abs(wind) * 2.2) + gust) * hh / 10
+                            lean = (r1 - 0.5) * hh * 0.5
+                            root = shade(base, 0.55 + 0.15 * r1)
+                            r2 = hf(x, b, 29)
+                            tip = paint.mix(shade(base, 0.82 + 0.22 * r2), (196, 186, 112), 0.25 * (r2 > 0.8))
+                            m = (bx + lean * 0.4 + sw * 0.3, y - hh * 0.55)
+                            t = (bx + lean + sw, y - hh)
+                            draw_lines(surf, root, False, [(bx, y + 3), (bx + lean * 0.15, y - hh * 0.25), m], 1)
+                            pygame.draw.line(surf, tip, m, t, 1)
+                        if patch > 0.75 and bio in tall_bio and hf(x, 31) < 0.12:
+                            # a seed head of tall grass
+                            hh = hmax * 1.6
+                            sw = (math.sin(time * 1.6 + x * 0.04) * (1 + abs(wind) * 2) + gust * 1.4) * hh / 10
+                            t = (x - ox + sw, y - hh)
+                            pygame.draw.aaline(surf, shade(base, 0.9), (x - ox, y + 2), t)
+                            pygame.draw.ellipse(surf, (196, 180, 120), (t[0] - 1.2, t[1] - 3, 2.6, 6))
+            x += step
 
     # ------------------------------------------------------------------ water
     def draw_water(self, surf, cam, time):
@@ -380,19 +492,39 @@ class PolyRenderer(SkyRenderer):
                     pygame.draw.circle(surf, (255, 150, 60), (int(gx), int(gy + 6 + math.sin(time + k) * 3)), 3)
                 continue
             drew = True
-            pygame.draw.polygon(ov, (44, 96, 136, 128), poly)
-            deep = [(x, y + 90) for x, y in top]
+            # deep teal body, a band near the surface that mirrors the pale sky, then the surface itself
+            pygame.draw.polygon(ov, (34, 84, 112, 150), poly)
+            band = [(x, y + 26) for x, y in top]
+            bpoly = []
+            for (xa, ya), (xb, yb) in zip(band, bottom):
+                bpoly.append((xa, min(ya, yb)))
+            if len(bpoly) > 1:
+                pygame.draw.polygon(ov, (120, 170, 196, 70), top + bpoly[::-1])
+            deep = [(x, y + 110) for x, y in top]
             dpoly = []
             for (xa, ya), (xb, yb) in zip(deep, bottom):
                 dpoly.append((xa, min(ya, yb)))
             if len(dpoly) > 1:
-                pygame.draw.polygon(ov, (20, 50, 84, 90), dpoly + bottom[::-1])
-            pygame.draw.lines(ov, (190, 220, 236, 200), False, top, 2)
-            # glints
-            for k in range(0, len(top) - 1, 2):
+                pygame.draw.polygon(ov, (14, 40, 70, 100), dpoly + bottom[::-1])
+            pygame.draw.lines(ov, (214, 234, 244, 210), False, top, 2)
+            pygame.draw.lines(ov, (150, 196, 214, 150), False, [(x, y + 3) for x, y in top], 1)
+            # drifting highlights: short strokes that follow the swell
+            for k in range(0, len(top) - 1):
                 gx, gy = top[k]
-                if hf(k + int(time * 2), int(gx)) < 0.25:
-                    pygame.draw.line(ov, (236, 246, 250, 160), (gx, gy + 4), (gx + 7, gy + 4), 1)
+                for j in range(2):
+                    hy = 5 + j * 9 + hf(k, j, 3) * 8
+                    ph = math.sin(time * 1.4 + k * 0.9 + j * 2.1)
+                    if ph > 0.35:
+                        ln = 4 + 8 * (ph - 0.35)
+                        a = int(70 + 100 * (ph - 0.35)) - j * 30
+                        pygame.draw.line(ov, (230, 242, 248, max(0, a)), (gx + hf(k, j) * 10, gy + hy),
+                                         (gx + hf(k, j) * 10 + ln, gy + hy), 1)
+            # foam where the water laps the shore
+            shores = ([top[0]] if x0 == wr.x0 else []) + ([top[-1]] if x1 == wr.x1 else [])
+            for (fx_, fy_) in shores:
+                for j in range(4):
+                    r = 2 + j * 0.6 + math.sin(time * 3 + j) * 0.8
+                    pygame.draw.circle(ov, (236, 244, 246, 150), (fx_ + (j - 1.5) * 3, fy_ + 1), r)
         if drew:
             surf.blit(ov, (0, 0))
 
@@ -417,6 +549,10 @@ class PolyRenderer(SkyRenderer):
         for p in sorted(pcs, key=lambda p: (order.get(p.layer, 1), p.role in ("roof", "step"), p.role == "door")):
             pts = [(x - x0, y - y0) for x, y in p.pts]
             draw_piece(s, pts, p.mat, p.detail, p.tint, p.role, p.open, p.hp / max(1, p.max_hp), p.id)
+        # weathering: a painterly grain over every surface (plaster, timber, stone), a little darker low down
+        W_, H_ = s.get_size()
+        s.blit(paint.texture_mul(W_, H_, 5 + b.id % 3, 206, 255), (0, 0), special_flags=pygame.BLEND_RGB_MULT)
+        s.blit(paint.vgrad(W_, H_, (255, 255, 255), (214, 206, 200)), (0, 0), special_flags=pygame.BLEND_RGB_MULT)
         self.bcache[key] = (b.version, s, (x0, y0))
         while len(self.bcache) > 260:
             self.bcache.popitem(last=False)
@@ -430,6 +566,9 @@ class PolyRenderer(SkyRenderer):
                 continue
             s, (bx, by) = self.building_surface(b)
             if s is not None:
+                gy = self.world.surface_y((b.x0 + b.x1) / 2) - oy
+                if by - oy < gy < by - oy + s.get_height() + 6:
+                    paint.contact_shadow(surf, (b.x0 + b.x1) / 2 - ox, gy + 1, (b.x1 - b.x0) * 1.15, 70)
                 surf.blit(s, (bx - ox, by - oy))
 
     def draw_gatehouses(self, surf, cam):
@@ -532,10 +671,31 @@ class PolyRenderer(SkyRenderer):
         skyc = np.array(env.ambient_color(), dtype=np.float32) / 255.0
         firec = np.array((1.0, 0.76, 0.48), dtype=np.float32)
         rgb = sun[..., None] * skyc[None, None, :] + fire[..., None] * firec[None, None, :]
-        rgb = np.clip(rgb + 0.05, 0, 1) * 255
+        rgb = np.clip(rgb + 0.065, 0, 1) * 255
         small = pygame.surfarray.make_surface(rgb.astype(np.uint8))
         big = pygame.transform.smoothscale(small, (gw * cs, gh * cs))
         surf.blit(big, (0, 0), special_flags=pygame.BLEND_MULT)
+        # warm light blooms around fires, torches and lit windows (stronger in the dark)
+        dark = 1.0 - min(1.0, day)
+        for (lx, ly, st) in dyn_lights:
+            if st <= 0.2 or not (ox - 200 < lx < ox + SW + 200 and oy - 200 < ly < oy + SH + 200):
+                continue
+            k = st * (0.25 + 0.75 * dark)
+            if k < 0.12:
+                continue
+            r = int(30 + 60 * st)
+            g = paint.add_glow(r, (255, 170, 90), round(min(0.6, k * 0.5), 1), 1.8)
+            surf.blit(g, (lx - ox - r, ly - oy - r), special_flags=pygame.BLEND_RGB_ADD)
+        # a soft vignette draws the eye to the middle of the picture
+        vg = getattr(self, "_vignette", None)
+        if vg is None or vg.get_size() != (SW, SH):
+            xs_ = (np.arange(SW, dtype=np.float32) / SW * 2 - 1)
+            ys_ = (np.arange(SH, dtype=np.float32) / SH * 2 - 1)
+            d = np.sqrt((xs_[:, None] * 0.85) ** 2 + (ys_[None, :]) ** 2)
+            v = (1 - np.clip((d - 0.6) / 0.9, 0, 1) ** 1.6 * 0.38) * 255
+            vg = pygame.surfarray.make_surface(np.repeat(v[:, :, None], 3, 2).astype(np.uint8))
+            self._vignette = vg
+        surf.blit(vg, (0, 0), special_flags=pygame.BLEND_MULT)
 
     def lights_in_view(self, cam, SW, SH, night):
         """Static light sources of buildings, decor, ores and lava near the screen."""
@@ -781,15 +941,35 @@ def draw_object(surf, o, ox, oy, r):
     pts = [(x - ox, y - oy) for x, y in o.world_pts()]
     if o.kind == "log":
         m = MATS[o.mat]
-        pygame.draw.polygon(surf, m.color, pts)
-        pygame.draw.line(surf, shade(m.color, 1.18), pts[0], pts[1], 2)
-        pygame.draw.line(surf, shade(m.color, 0.75), pts[3], pts[2], 2)
+        bark = shade(m.color, 0.8)
+        pygame.draw.polygon(surf, shade(bark, 0.55), pts)
+        a, b, c, d = pts[0], pts[1], pts[2], pts[3]
+        inset = [(a[0] + (d[0] - a[0]) * 0.1, a[1] + (d[1] - a[1]) * 0.1), (b[0] + (c[0] - b[0]) * 0.1, b[1] + (c[1] - b[1]) * 0.1),
+                 (b[0] + (c[0] - b[0]) * 0.9, b[1] + (c[1] - b[1]) * 0.9), (a[0] + (d[0] - a[0]) * 0.9, a[1] + (d[1] - a[1]) * 0.9)]
+        pygame.draw.polygon(surf, bark, inset)
+        # the upper side catches the light, bark fissures run along the trunk
+        up = (a, b) if (a[1] + b[1]) < (c[1] + d[1]) else (d, c)
+        lo = (d, c) if up[0] is a else (a, b)
+        mid = lambda p, q, t: (p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t)
+        pygame.draw.polygon(surf, paint.warm(bark, 0.18), [up[0], up[1], mid(up[1], lo[1], 0.3), mid(up[0], lo[0], 0.3)])
+        L = math.hypot(b[0] - a[0], b[1] - a[1])
+        rng = random.Random(o.id)
+        for k in range(int(L / 9)):
+            t0 = rng.uniform(0.0, 0.9)
+            t1 = min(1.0, t0 + rng.uniform(0.06, 0.18))
+            v = rng.uniform(0.25, 0.85)
+            p0 = mid(mid(a, d, v), mid(b, c, v), t0)
+            p1 = mid(mid(a, d, v), mid(b, c, v), t1)
+            pygame.draw.line(surf, shade(bark, 0.62), p0, p1, 1)
         # cut ends show the rings
-        for a, b in ((pts[0], pts[3]), (pts[1], pts[2])):
-            cx, cy = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
-            rr = max(2, int(math.hypot(a[0] - b[0], a[1] - b[1]) / 2))
-            pygame.draw.circle(surf, (196, 160, 108), (int(cx), int(cy)), rr)
-            pygame.draw.circle(surf, (150, 112, 70), (int(cx), int(cy)), max(1, rr // 2), 1)
+        for e0, e1 in ((a, d), (b, c)):
+            cx, cy = (e0[0] + e1[0]) / 2, (e0[1] + e1[1]) / 2
+            rr = max(2, math.hypot(e0[0] - e1[0], e0[1] - e1[1]) / 2)
+            pygame.draw.circle(surf, shade(bark, 0.6), (cx, cy), rr + 0.8)
+            pygame.draw.circle(surf, (206, 170, 118), (cx, cy), rr)
+            for q in (0.66, 0.36):
+                pygame.draw.circle(surf, (176, 136, 88), (cx, cy), max(1, rr * q), 1)
+            pygame.draw.circle(surf, (150, 112, 70), (cx, cy), 1)
         if o.crown is not None:
             t = o.crown
             # the crown rides on the falling trunk: draw the tree rotated about its base
@@ -808,26 +988,23 @@ def draw_object(surf, o, ox, oy, r):
 
 
 def draw_falling_crown(surf, o, t, ox, oy, r):
-    """A felled trunk is a log whose local +x points up the tree; draw the crown riding on it."""
-    g = t.geo()
+    """A felled trunk is a log whose local +x points up the tree; the painted tree rides on it, rotated about
+    its base."""
+    spr, (bx, by) = flora.crown_sprite(t, r.season)
     a = o.body.angle if o.body is not None else o.angle
     c, s = math.cos(a), math.sin(a)
     hl = o.pts[1][0]
-    px, py = o.x, o.y
-
-    def P(x, y):
-        lx, ly = -hl - y, x
-        return (px + lx * c - ly * s - ox, py + lx * s + ly * c - oy)
-    pal = flora.season_palette(t.kind, r.season)
-    for a_, b_, wdt in g["branches"]:
-        pygame.draw.line(surf, flora.BARK.get(t.kind, (80, 60, 40)), P(*a_), P(*b_), max(1, int(wdt)))
-    if g["tiers"]:
-        for i, tier in enumerate(g["tiers"]):
-            pygame.draw.polygon(surf, shade(pal[min(2, i)], 0.9), [P(x, y) for x, y in tier])
-    if r.season == "winter" and t.kind not in flora.EVERGREEN:
-        return
-    for (pts, dy, dx) in g["clumps"]:
-        pygame.draw.polygon(surf, shade(pal[1], 0.9), [P(x, y) for x, y in pts])
+    # pivot: the tree's base sits at the log's lower end
+    px = o.x + (-hl) * c - ox
+    py = o.y + (-hl) * s - oy
+    theta = math.atan2(-c, -s)                   # turns the tree's up (0, -1) onto the log's +x (c, s)
+    deg = math.degrees(theta)
+    rot = pygame.transform.rotozoom(spr, deg, 1.0)
+    w, h = spr.get_size()
+    vx, vy = bx - w / 2, by - h / 2               # pivot relative to the sprite centre
+    ct, st = math.cos(theta), math.sin(theta)
+    rx, ry = vx * ct + vy * st, -vx * st + vy * ct
+    surf.blit(rot, (px - rx - rot.get_width() / 2, py - ry - rot.get_height() / 2))
 
 
 # ====================================================================== decor
@@ -958,37 +1135,61 @@ def draw_decor(s, d, x, y, time, wind, night, world, season):
     elif k == "plot":
         draw_plot(s, d, x, y, world, time, wind, season)
     elif k == "bush":
-        rng = random.Random(d.data.get("seed", 1))
-        base = (60, 110, 50) if season != "herbst" else (130, 100, 40)
-        if season == "winter":
-            base = (90, 80, 70)
-        for i in range(4):
-            r = rng.uniform(5, 9)
-            cx = x + rng.uniform(-8, 8)
-            cy = y - r * 0.8 - rng.uniform(0, 4)
-            pygame.draw.polygon(s, shade(base, 0.85 + i * 0.08), [(cx - r, cy + r * 0.4), (cx - r * 0.4, cy - r),
-                                                                  (cx + r * 0.6, cy - r * 0.8), (cx + r, cy + r * 0.3),
-                                                                  (cx, cy + r * 0.7)])
-        if rng.random() < 0.5 and season == "sommer":
-            pygame.draw.circle(s, (170, 40, 60), (int(x + 3), int(y - 8)), 2)
+        spr = bush_sprite(d.data.get("seed", 1), season, d.data.get("berries", None))
+        sw = math.sin(time * 1.7 + x * 0.05) * (0.6 + abs(wind)) * 0.6
+        paint.contact_shadow(s, x, y, spr.get_width() * 0.8, 60)
+        s.blit(spr, (x - spr.get_width() / 2 + sw, y - spr.get_height() + 3))
     elif k in ("flowers", "heather"):
-        rng = random.Random(d.data.get("seed", 1))
-        cols = [(230, 220, 90), (220, 90, 90), (150, 120, 220), (240, 240, 240)] if k == "flowers" else [
-            (170, 100, 170), (190, 120, 190)]
         if season == "winter":
             return
-        for i in range(5):
-            fx = x + rng.uniform(-7, 7)
-            hh = rng.uniform(5, 11)
-            sw = math.sin(time * 2 + fx * 0.1) * 1.5
-            pygame.draw.line(s, (70, 120, 50), (fx, y), (fx + sw, y - hh), 1)
-            pygame.draw.circle(s, rng.choice(cols), (int(fx + sw), int(y - hh)), 2)
+        rng = random.Random(d.data.get("seed", 1))
+        if k == "flowers":
+            cols = [(236, 222, 96), (226, 96, 92), (160, 128, 226), (246, 244, 240), (240, 160, 190)]
+            cols = [rng.choice(cols), rng.choice(cols)]
+        else:
+            cols = [(168, 100, 172), (194, 128, 196), (150, 88, 150)]
+        for i in range(7 if k == "flowers" else 12):
+            fx = x + rng.uniform(-9, 9)
+            hh = rng.uniform(5, 13) if k == "flowers" else rng.uniform(3, 8)
+            sw = math.sin(time * 2 + fx * 0.1) * 1.5 + wind * 1.2
+            top = (fx + sw, y - hh)
+            stem = (70 + rng.randint(-10, 10), 116 + rng.randint(-10, 10), 52)
+            pygame.draw.aaline(s, stem, (fx, y), top)
+            if k == "heather":
+                for j in range(3):
+                    pygame.draw.circle(s, rng.choice(cols), (top[0] + rng.uniform(-1, 1), top[1] + j * 1.6), 1.3)
+                continue
+            if rng.random() < 0.5:
+                paint.leaf(s, shade(stem, 1.1), fx, y - hh * 0.4, 4, -math.pi / 2 + rng.choice((-1, 1)) * 0.9, 0.35)
+            c = cols[i % 2]
+            for a in range(5):
+                an = a * math.tau / 5 + i
+                pygame.draw.circle(s, c, (top[0] + math.cos(an) * 1.6, top[1] + math.sin(an) * 1.4), 1.4)
+            pygame.draw.circle(s, shade(c, 1.2) if c != (246, 244, 240) else (240, 200, 60), top, 1.0)
     elif k == "fern":
-        sw = math.sin(time * 1.6 + x * 0.1) * 1.5
-        col = (60, 110, 50) if season not in ("herbst", "winter") else (140, 100, 50)
-        for a in (-0.9, -0.4, 0.1, 0.6, 1.0):
-            ex, ey = x + math.sin(a) * 12 + sw, y - math.cos(a) * 10
-            pygame.draw.line(s, col, (x, y), (ex, ey), 2)
+        col = (64, 116, 52) if season not in ("herbst", "winter") else (150, 104, 52)
+        if season == "winter":
+            col = (120, 96, 70)
+        rng = random.Random(int(x))
+        for fi, a in enumerate((-1.15, -0.65, -0.2, 0.25, 0.7, 1.1)):
+            sw = math.sin(time * 1.6 + x * 0.1 + fi) * 0.06 + wind * 0.05
+            ln = 13 + 4 * math.cos(a) + rng.uniform(-2, 2)
+            pts = []
+            for j in range(6):
+                u = j / 5
+                ang = a + sw + u * u * 0.9 * (1 if a >= 0 else -1)
+                pts.append((x + math.sin(ang) * ln * u, y - math.cos(ang) * ln * u * 0.9))
+            fc = shade(col, 0.8 + 0.08 * fi % 3) if a > 0 else shade(col, 1.08)
+            pygame.draw.aalines(s, shade(fc, 0.75), False, pts)
+            for j in range(1, 6):
+                px_, py_ = pts[j]
+                qx, qy = pts[j - 1]
+                dx, dy = px_ - qx, py_ - qy
+                dl = math.hypot(dx, dy) or 1
+                nx, ny = -dy / dl, dx / dl
+                pl = 3.4 * (1 - j / 7)
+                for side in (-1, 1):
+                    paint.leaf(s, fc, px_, py_, pl + 0.6, math.atan2(ny * side - dy / dl * 0.6, nx * side - dx / dl * 0.6), 0.35)
     elif k == "vine":
         pygame.draw.line(s, (100, 76, 50), (x, y), (x, y - 20), 2)
         pygame.draw.line(s, (100, 76, 50), (x - 6, y - 16), (x + 6, y - 16), 1)
@@ -999,13 +1200,20 @@ def draw_decor(s, d, x, y, time, wind, night, world, season):
                 pygame.draw.circle(s, (90, 40, 90), (int(x + 2), int(y - 12)), 3)
     elif k == "reeds":
         rng = random.Random(d.data.get("seed", 1))
-        for i in range(6):
-            fx = x + rng.uniform(-6, 6)
-            hh = rng.uniform(14, 26)
-            sw = math.sin(time * 1.7 + fx * 0.2) * 2 + wind * 2
-            pygame.draw.line(s, (120, 130, 70), (fx, y), (fx + sw, y - hh), 1)
-            if i % 2 == 0:
-                pygame.draw.ellipse(s, (110, 76, 46), (fx + sw - 1, y - hh, 3, 7))
+        base = (112, 128, 66) if season not in ("herbst", "winter") else (156, 134, 82)
+        for i in range(9):
+            fx = x + rng.uniform(-7, 7)
+            hh = rng.uniform(16, 30)
+            sw = math.sin(time * 1.7 + fx * 0.2) * 2 + wind * 2.5
+            c = shade(base, rng.uniform(0.8, 1.15))
+            mid = (fx + sw * 0.3, y - hh * 0.5)
+            top = (fx + sw, y - hh)
+            pygame.draw.lines(s, c, False, [(fx, y), mid, top], 2 if i % 3 == 0 else 1)
+            if i % 3 == 0:
+                pygame.draw.ellipse(s, (104, 70, 44), (top[0] - 1.5, top[1] - 1, 3.5, 8))
+                pygame.draw.line(s, c, top, (top[0] + sw * 0.2, top[1] - 4), 1)
+            elif i % 3 == 1:
+                paint.leaf(s, shade(c, 1.1), mid[0], mid[1], hh * 0.5, -math.pi / 2 + 0.5 + sw * 0.05, 0.12)
     elif k == "seaweed":
         hh = d.h
         prev = (x, y)
@@ -1018,10 +1226,63 @@ def draw_decor(s, d, x, y, time, wind, night, world, season):
     elif k == "shell":
         pygame.draw.ellipse(s, (226, 200, 186), (x - 3, y - 3, 6, 4))
     elif k == "mushroom":
-        pygame.draw.line(s, (220, 214, 200), (x, y), (x, y - 5), 2)
-        pygame.draw.ellipse(s, (180, 60, 50) if int(x) % 2 else (200, 170, 120), (x - 4, y - 8, 8, 4))
+        red = int(x) % 2
+        cap = (190, 52, 44) if red else (196, 160, 112)
+        pygame.draw.line(s, (226, 220, 206), (x, y), (x, y - 5), 2)
+        pygame.draw.ellipse(s, shade(cap, 0.7), (x - 4.5, y - 8.5, 9, 5))
+        pygame.draw.ellipse(s, cap, (x - 4.5, y - 9, 9, 4.2))
+        pygame.draw.ellipse(s, paint.warm(cap, 0.3), (x - 3, y - 8.6, 4, 2))
+        if red:
+            for dx_, dy_ in ((-2, -7.5), (1.5, -8), (2.8, -7)):
+                pygame.draw.circle(s, (246, 240, 230), (x + dx_, y + dy_), 0.8)
     elif k == "post":
         pygame.draw.rect(s, (90, 64, 40), (x - 2, y - d.h, 4, d.h))
+
+
+_BUSH = {}
+
+
+def bush_sprite(seed, season, berries=None):
+    key = (seed, season)
+    spr = _BUSH.get(key)
+    if spr is not None:
+        return spr
+    rng = random.Random(seed * 13 + 5)
+    if season == "winter":
+        pal = [(70, 62, 56), (90, 78, 66), (110, 96, 80)]
+    elif season == "herbst":
+        pal = [(110, 70, 30), (150, 100, 40), (190, 140, 60)]
+    elif season == "fruehling":
+        pal = [(60, 104, 46), (86, 136, 58), (132, 176, 82)]
+    else:
+        pal = [(44, 86, 40), (66, 112, 50), (110, 152, 70)]
+    W, H = 40, 28
+    S = paint.SS
+    big = pygame.Surface((W * S, H * S), pygame.SRCALPHA)
+    clumps = []
+    for i in range(rng.randint(3, 5)):
+        r = rng.uniform(6, 9.5)
+        clumps.append(((W / 2 + rng.uniform(-10, 10)) * S, (H - r * 0.8 - rng.uniform(0, 5)) * S, r * S))
+    clumps.sort(key=lambda c: -c[1])
+    if season == "winter":
+        for (cx, cy, r) in clumps:
+            for _ in range(10):
+                a = rng.uniform(-2.6, -0.5)
+                pygame.draw.line(big, pal[rng.randint(0, 2)], (cx, H * S), (cx + math.cos(a) * r * 1.3, cy + math.sin(a) * r), S)
+    else:
+        paint.paint_crown(big, clumps, pal, rng, leafy=1.0, blur=2)
+        if season == "sommer" and rng.random() < 0.5:
+            for _ in range(rng.randint(4, 9)):
+                c = clumps[rng.randrange(len(clumps))]
+                bx = c[0] + rng.uniform(-c[2], c[2]) * 0.6
+                by = c[1] + rng.uniform(-c[2], c[2]) * 0.5
+                pygame.draw.circle(big, (150, 26, 46), (bx, by), 1.6 * S)
+                pygame.draw.circle(big, (230, 120, 130), (bx - S * 0.6, by - S * 0.6), 0.6 * S)
+    spr = paint.shrink(big)
+    if len(_BUSH) > 400:
+        _BUSH.clear()
+    _BUSH[key] = spr
+    return spr
 
 
 def draw_plot(s, d, x, y, world, time, wind, season):

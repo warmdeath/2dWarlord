@@ -130,125 +130,267 @@ class Renderer:
             top = lerp_col(top, (40, 20, 60), 0.35)
         return top, bot
 
+    # ------------------------------------------------------------------ painted sky
+    def _cloud_masks(self):
+        """A handful of cloud shapes, each as two alpha masks: the shaded underside and the sunlit top."""
+        cm = getattr(self, "_cmasks", None)
+        if cm is not None:
+            return cm
+        from . import paint
+        rng = random.Random(77)
+        out = []
+        for i in range(9):
+            W, H = rng.randint(220, 380), rng.randint(90, 140)
+            shadow = pygame.Surface((W, H), pygame.SRCALPHA)
+            light = pygame.Surface((W, H), pygame.SRCALPHA)
+            puffs = []
+            n = rng.randint(16, 26)
+            for k in range(n):
+                u = rng.random()
+                bulge = math.sin(u * math.pi)
+                r = H * (0.14 + 0.2 * bulge) * rng.uniform(0.75, 1.2)
+                x = W * (0.12 + 0.76 * u)
+                y = H * 0.74 - r * 0.6 - bulge * H * 0.22 * rng.uniform(0.3, 1.0)
+                puffs.append((x, y, r))
+            for x, y, r in puffs:
+                g = paint.glow(int(r * 1.1), (255, 255, 255), 255, 0.35)
+                shadow.blit(g, (x - g.get_width() / 2, y - g.get_height() / 2), special_flags=pygame.BLEND_RGBA_MAX)
+            for x, y, r in puffs:
+                g = paint.glow(int(r * 0.9), (255, 255, 255), 255, 0.5)
+                light.blit(g, (x - g.get_width() / 2 - r * 0.15, y - g.get_height() / 2 - r * 0.28),
+                           special_flags=pygame.BLEND_RGBA_MAX)
+            # flat-ish bottoms
+            cut = pygame.Surface((W, H), pygame.SRCALPHA)
+            cut.fill((255, 255, 255, 255))
+            for yy in range(int(H * 0.72), H):
+                a = max(0, min(255, 255 - int((yy - H * 0.72) * 22)))
+                pygame.draw.line(cut, (255, 255, 255, a), (0, yy), (W, yy))
+            shadow.blit(cut, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
+            light.blit(cut, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
+            out.append((shadow, light))
+        self._cmasks = out
+        self._ccache = {}
+        return out
+
+    def _cloud(self, i, lit, dark, alpha):
+        self._cloud_masks()
+        key = (i, lit, dark, alpha)
+        c = self._ccache.get(key)
+        if c is None:
+            sh, li = self._cloud_masks()[i]
+            c = pygame.Surface(sh.get_size(), pygame.SRCALPHA)
+            a = sh.copy()
+            a.fill((*dark, alpha), special_flags=pygame.BLEND_RGBA_MULT)
+            c.blit(a, (0, 0))
+            b = li.copy()
+            b.fill((*lit, alpha), special_flags=pygame.BLEND_RGBA_MULT)
+            c.blit(b, (0, 0))
+            if len(self._ccache) > 160:
+                self._ccache.clear()
+            self._ccache[key] = c
+        return c
+
     def draw_sky(self, surf, env, cam):
+        from . import paint
         SW, SH = surf.get_size()
         top, bot = self.sky_colors(env)
-        key = (top, bot, SW, SH)
-        if self.light_cache is None or self.light_cache[0] != key:
-            g = pygame.Surface((1, 64))
-            for i in range(64):
-                g.set_at((0, i), lerp_col(top, bot, i / 63))
-            self.light_cache = (key, pygame.transform.smoothscale(g, (SW, SH)))
-        surf.blit(self.light_cache[1], (0, 0))
         sun = env.sun_height()
-        # stars
-        if sun < 0.05:
-            a = min(1.0, (0.05 - sun) * 4) * (1 - env.gloom())
-            for sx, sy, tw in self.stars:
-                b = int(160 * a * (0.6 + 0.4 * math.sin(env.time * 2 + tw * 20)))
-                if b > 10:
-                    surf.set_at((int(sx * SW), int(sy * SH)), (b, b, min(255, b + 30)))
-        # sun & moon on an arc
         ang = env.day_fraction() * math.tau - math.pi / 2
         cx, cy = SW / 2, SH * 0.95
         rx, ry = SW * 0.48, SH * 0.85
         sx, sy = cx - math.cos(ang) * rx, cy - math.sin(ang) * ry
-        if sy < SH:
-            glow = pygame.Surface((160, 160), pygame.SRCALPHA)
-            for r in range(70, 10, -10):
-                pygame.draw.circle(glow, (255, 230, 170, 12), (80, 80), r)
-            surf.blit(glow, (sx - 80, sy - 80))
-            pygame.draw.circle(surf, (255, 238, 190), (int(sx), int(sy)), 18)
+        midc = lerp_col(top, bot, 0.55)
+        key = (top, bot, SW, SH)
+        if self.light_cache is None or self.light_cache[0] != key:
+            g = pygame.Surface((1, 96))
+            for i in range(96):
+                t = i / 95
+                c = lerp_col(top, midc, min(1, t / 0.6)) if t < 0.6 else lerp_col(midc, bot, (t - 0.6) / 0.4)
+                g.set_at((0, i), c)
+            self.light_cache = (key, pygame.transform.smoothscale(g, (SW, SH)))
+        surf.blit(self.light_cache[1], (0, 0))
+        # stars
+        if sun < 0.05:
+            a = min(1.0, (0.05 - sun) * 4) * (1 - env.gloom())
+            for sx_, sy_, tw in self.stars:
+                b = int(160 * a * (0.6 + 0.4 * math.sin(env.time * 2 + tw * 20)))
+                if b > 10:
+                    surf.set_at((int(sx_ * SW), int(sy_ * SH)), (b, b, min(255, b + 30)))
+        # the sun: a wide warm haze, a bright halo, the disc
+        warmth = max(0.0, 1.0 - abs(sun) * 3.2)             # low sun = warm
+        if sy < SH + 120:
+            gl = 1 - env.gloom() * 0.8
+            hc = lerp_col((255, 246, 220), (255, 170, 90), warmth)
+            haze = paint.add_glow(380, tuple((v // 16) * 16 for v in hc), round(0.2 * gl, 1), 2.2)
+            surf.blit(haze, (sx - 380, sy - 380), special_flags=pygame.BLEND_RGB_ADD)
+            halo = paint.add_glow(70, (255, 236, 196), round(0.3 * gl, 1), 2.6)
+            surf.blit(halo, (sx - 90, sy - 90), special_flags=pygame.BLEND_RGB_ADD)
+            if gl > 0.5:
+                pygame.draw.circle(surf, lerp_col((255, 248, 226), (255, 196, 120), warmth), (sx, sy), 13)
         mx, my = cx + math.cos(ang) * rx, cy + math.sin(ang) * ry
         if my < SH:
-            pygame.draw.circle(surf, (226, 226, 236), (int(mx), int(my)), 13)
-            pygame.draw.circle(surf, top, (int(mx) + 5, int(my) - 3), 11)
-        # clouds
+            mg = paint.add_glow(60, (180, 190, 230), 0.25, 2.0)
+            surf.blit(mg, (mx - 60, my - 60), special_flags=pygame.BLEND_RGB_ADD)
+            pygame.draw.circle(surf, (230, 230, 238), (mx, my), 12)
+            pygame.draw.circle(surf, (200, 200, 212), (mx - 3, my + 2), 3)
+            pygame.draw.circle(surf, (206, 206, 218), (mx + 4, my - 3), 2)
+        # clouds: shaded undersides, tops lit by the sun (golden when it is low)
         cover = env.cloud_cover()
-        ccol = lerp_col((250, 248, 244), (110, 112, 118), env.gloom())
-        ccol = lerp_col(ccol, (40, 44, 60), max(0.0, -sun) * 0.9)
-        for c in self.clouds:
-            c[0] += env.wind * 18 * env.dt_hint
-            x = (c[0] - cam.x * 0.05) % 4200 - 400
-            if x > SW + 300:
+        night = max(0.0, -sun)
+        lit = lerp_col((255, 252, 246), (255, 196, 140), warmth * 0.9)
+        lit = lerp_col(lit, (150, 152, 160), env.gloom() * 0.7)
+        lit = lerp_col(lit, (70, 76, 100), min(1, night * 2.5))
+        dark = lerp_col(lerp_col(bot, (150, 156, 176), 0.5), (196, 120, 120), warmth * 0.4)
+        dark = lerp_col(dark, (90, 92, 100), env.gloom() * 0.8)
+        dark = lerp_col(dark, (24, 28, 44), min(1, night * 2.5))
+        q = lambda c: tuple((v // 8) * 8 for v in c)
+        alpha = int(150 + 100 * min(1.0, cover + 0.3))
+        self._cloud_masks()
+        for k, c in enumerate(self.clouds):
+            c[0] += env.wind * 18 * env.dt_hint * (0.6 + c[3] * 0.6)
+            x = (c[0] - cam.x * 0.04 * c[3]) % 4200 - 400
+            if x > SW + 300 or (k > 3 + cover * 10):
                 continue
-            n = 1 + int(cover * 5)
-            for k in range(n):
-                r = c[2] * (0.35 + 0.12 * k) * (0.6 + cover * 0.6)
-                pygame.draw.ellipse(surf, ccol, (x + k * c[2] * 0.33, c[1] + (k % 2) * 10 - r * 0.3, r * 1.6, r * 0.7))
+            img = self._cloud(k % 9, q(lit), q(dark), (alpha // 16) * 16)
+            sc = c[2] / 160 * (0.7 + cover * 0.6)
+            if abs(sc - 1) > 0.05:
+                key = ("s", k, round(sc, 1), q(lit), q(dark), (alpha // 16) * 16)
+                im2 = self._ccache.get(key)
+                if im2 is None:
+                    im2 = pygame.transform.smoothscale_by(img, round(sc, 1))
+                    self._ccache[key] = im2
+                img = im2
+            surf.blit(img, (x, c[1] - img.get_height() * 0.5))
 
     def draw_parallax(self, surf, env, cam):
+        """Distance painted in layers of haze: far blue mountains, rolling hills, forested ridges and a near
+        line of tree crowns, each paler and bluer the farther it is, with mist pooling at their feet."""
+        from . import paint
         SW, SH = surf.get_size()
         top, bot = self.sky_colors(env)
         sun = env.sun_height()
         night = max(0.0, min(1.0, -sun * 3 + 0.3)) if sun < 0.1 else 0.0
         horizon = SH * 0.50 - (cam.y - (SEA_LEVEL * TILE - SH * 0.6)) * 0.08
-        layers = [
-            (0.12, self.far, lerp_col(bot, (70, 80, 110), 0.45), 0.0, 1.0),
-            (0.30, self.mid, lerp_col(bot, (46, 60, 70), 0.65), 22, 0.8),
-        ]
-        for f, prof, col, yoff, hscale in layers:
-            col = lerp_col(col, (14, 16, 26), night * 0.85)
+        haze = lerp_col(bot, (200, 210, 225), 0.2)
+        cz = cam.y - SEA_LEVEL * TILE
+
+        def layer_pts(prof, f, base_y, hscale, step=6, jag=0.0, seed=0):
             pts = [(0, SH)]
-            step = 8
-            base_y = horizon + yoff + (cam.y - SEA_LEVEL * TILE) * (0.05 * f)
             for sx in range(0, SW + step, step):
                 wx = (cam.x + SW / 2 + (sx - SW / 2) / f) / TILE / 8
                 i = int(max(0, min(len(prof) - 2, wx)))
                 fr = wx - int(wx)
                 h = prof[i] * (1 - fr) + prof[i + 1] * fr
+                if jag:
+                    h += jag * math.sin(wx * 3.1 + seed) * math.sin(wx * 7.3 + seed * 2)
                 pts.append((sx, float(base_y - h * hscale)))
             pts.append((SW, SH))
+            return pts
+
+        def mist(base_y, depth, col, a):
+            if base_y > SH:
+                return
+            g = paint.vgrad(SW, int(depth), col, col, 0, a)
+            surf.blit(g, (0, int(base_y - depth)))
+            if base_y < SH:
+                pygame.draw.rect(surf, col, (0, int(base_y), SW, SH - int(base_y))) if a >= 250 else None
+        layers = [
+            # f, profile, colour, y offset, height scale, ridge jaggedness
+            (0.08, self.far, lerp_col(lerp_col(bot, (96, 112, 150), 0.38), haze, 0.15), -6, 1.15, 2.5),
+            (0.16, self.mid, lerp_col(bot, (84, 104, 118), 0.5), 12, 1.0, 1.5),
+            (0.26, self.mid * 0.7 + self.far * 0.15, lerp_col(bot, (60, 86, 82), 0.62), 30, 0.9, 1.0),
+        ]
+        for li, (f, prof, col, yoff, hscale, jag) in enumerate(layers):
+            col = lerp_col(col, (14, 16, 26), night * 0.85)
+            base_y = horizon + yoff + cz * (0.05 * f)
+            pts = layer_pts(prof, f, base_y, hscale, jag=jag, seed=li * 5)
             pygame.draw.polygon(surf, col, pts)
-            if f == 0.12:
-                # snow caps & volcano glow on the far range
-                snowc = lerp_col((232, 236, 244), col, 0.15 + night * 0.8)
+            # a sunlit rim along the ridge, toward the sun's side
+            rim = lerp_col(col, lerp_col(bot, (255, 236, 200), 0.5), 0.12 * (1 - night))
+            pygame.draw.aalines(surf, rim, False, pts[1:-1])
+            if li == 0:
+                snowc = lerp_col((236, 240, 248), col, 0.25 + night * 0.7)
                 for k in range(1, len(pts) - 2):
                     sx, sy = pts[k]
                     sx2, sy2 = pts[k + 1]
                     i = int(max(0, min(len(prof) - 1, (cam.x + SW / 2 + (sx - SW / 2) / f) / TILE / 8)))
                     hgt = base_y - sy
                     if self.snowy[i] > 0.5 and hgt > 150:
-                        d = min(22, (hgt - 150) * 0.4 + 4)
-                        pygame.draw.polygon(surf, snowc, [(sx, sy), (sx2, sy2), (sx2, sy2 + d), (sx, sy + d)])
+                        dd = min(26, (hgt - 150) * 0.4 + 4)
+                        pygame.draw.polygon(surf, snowc, [(sx, sy), (sx2, sy2), (sx2, sy2 + dd * 0.8), (sx, sy + dd)])
                     if self.volcanic[i] > 0.5 and hgt > 170 and k % 7 == 0:
                         pygame.draw.circle(surf, (255, 110, 40), (int(sx), int(sy) + 2), 3)
+            if li == 2:
+                self._ridge_trees(surf, cam, f, prof, base_y, hscale, col, 0.55, 14)
+            hz = lerp_col(haze, (14, 16, 26), night * 0.85)
+            mist(base_y + 30, 70 + li * 20, hz, 150 - li * 25)
         # settlement silhouettes on the mid layer
-        f = 0.30
+        f = 0.26
         for s in self.world.settlements:
             if s["type"] not in ("castle", "capital", "city", "robber", "town", "monastery"):
                 continue
             wxp = (s["x0"] + s["x1"]) / 2 * TILE
             sx = SW / 2 + (wxp - cam.x - SW / 2) * f
             if -200 < sx < SW + 200 and abs(wxp - cam.x - SW / 2) > SW * 0.6:
-                base_y = horizon + 22 + (cam.y - SEA_LEVEL * TILE) * (0.05 * f)
+                base_y = horizon + 30 + cz * (0.05 * f)
                 i = int(max(0, min(len(self.mid) - 1, s["x0"] / 8)))
-                by = base_y - self.mid[i] * 0.8
-                c = lerp_col(lerp_col(bot, (40, 52, 62), 0.7), (14, 16, 26), night * 0.85)
+                by = base_y - (self.mid[i] * 0.7 + self.far[i] * 0.15) * 0.9
+                c = lerp_col(lerp_col(bot, (52, 66, 74), 0.66), (14, 16, 26), night * 0.85)
                 self._castle_silhouette(surf, sx, by, c, s["type"])
-        # near treeline
+        # the near line of tree crowns
         f = 0.5
-        col = lerp_col(lerp_col(bot, (30, 46, 44), 0.8), (10, 12, 20), night * 0.85)
-        base_y = horizon + 44 + (cam.y - SEA_LEVEL * TILE) * 0.03
+        col = lerp_col(lerp_col(bot, (34, 56, 46), 0.78), (10, 12, 20), night * 0.85)
+        base_y = horizon + 44 + cz * 0.03
         band = [(-40, SH)]
         for sx in range(-40, SW + 60, 20):
             i = int(max(0, min(len(self.treeline) - 1, (cam.x + SW / 2 + (sx - SW / 2) / f) / TILE / 8)))
-            band.append((sx, base_y - 4 if self.treeline[i] > 0.08 else base_y + 400))
+            tl = float(self.treeline[i])
+            band.append((sx, base_y - 6 + max(0.0, (0.16 - tl) / 0.16) * 90))
         band.append((SW + 60, SH))
         pygame.draw.polygon(surf, col, band)
+        self._ridge_trees(surf, cam, f, None, base_y, 1.0, col, 1.0, 22)
+        hz = lerp_col(haze, (14, 16, 26), night * 0.85)
+        mist(base_y + 40, 60, hz, 90)
+
+    def _ridge_trees(self, surf, cam, f, prof, base_y, hscale, col, size, spacing):
+        """Painted tree silhouettes standing on a ridge: round broadleaf crowns and pointed firs, lit a little on
+        the sun's side."""
+        SW, SH = surf.get_size()
         shift = (cam.x + SW / 2) * f - SW / 2
-        for k in range(int((shift - 40) // 22), int((shift + SW + 40) // 22) + 1):
-            sxx = k * 22 - shift
-            wx = (k * 22 / f) / TILE / 8
+        lit = lerp_col(col, (200, 210, 190), 0.12)
+        for k in range(int((shift - 40) // spacing), int((shift + SW + 40) // spacing) + 1):
+            sxx = k * spacing - shift + ((k * 7919) % 9 - 4)
+            wx = (k * spacing / f) / TILE / 8
             i = int(max(0, min(len(self.treeline) - 1, wx)))
             if self.treeline[i] < 0.08 or self.treeline[i] < ((k * 2654435761) % 100) / 100.0:
                 continue
-            hh = 40 + (k * 7919) % 50
-            if (k * 31) % 3 == 0:
-                pygame.draw.polygon(surf, col, [(sxx - 12, base_y), (sxx, base_y - hh), (sxx + 12, base_y)])
+            if prof is not None:
+                j = int(max(0, min(len(prof) - 1, wx)))
+                gy = base_y - prof[j] * hscale + 4
             else:
-                pygame.draw.circle(surf, col, (int(sxx), int(base_y - hh * 0.6)), int(hh * 0.4))
-                pygame.draw.rect(surf, col, (sxx - 2, base_y - hh * 0.5, 4, hh * 0.5))
+                gy = base_y
+            hh = (36 + (k * 7919) % 46) * size
+            if (k * 31) % 3 == 0:
+                # a fir: stacked drooping tiers
+                for t in range(4):
+                    u = t / 4
+                    wdt = hh * 0.3 * (1 - u * 0.7)
+                    yb = gy - hh * (0.15 + 0.7 * u)
+                    pygame.draw.polygon(surf, col, [(sxx - wdt, yb + 3), (sxx, yb - hh * 0.3), (sxx + wdt, yb + 3)])
+                    pygame.draw.line(surf, lit, (sxx - wdt * 0.9, yb + 2), (sxx, yb - hh * 0.28), 1)
+                pygame.draw.rect(surf, col, (sxx - 1, gy - hh * 0.2, 3, hh * 0.2 + 4))
+            else:
+                r = hh * 0.36
+                cy = gy - hh * 0.6
+                rng = random.Random(k)
+                pygame.draw.rect(surf, col, (sxx - 2, cy, 4, gy - cy + 4))
+                for q in range(5):
+                    a = rng.uniform(0, math.tau)
+                    d = rng.uniform(0, r * 0.6)
+                    pygame.draw.circle(surf, col, (sxx + math.cos(a) * d, cy + math.sin(a) * d * 0.7),
+                                       r * rng.uniform(0.55, 0.8))
+                pygame.draw.circle(surf, lit, (sxx - r * 0.35, cy - r * 0.45), r * 0.35)
+                pygame.draw.circle(surf, col, (sxx - r * 0.2, cy - r * 0.3), r * 0.36)
 
     @staticmethod
     def _castle_silhouette(surf, x, y, c, kind):
