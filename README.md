@@ -270,6 +270,12 @@ upper left.
 | in the air | plunging strike |
 | on horseback | couched lance / riding slash, damage grows with speed |
 
+Sword, axe and mace blows move like real cuts: the blade is cocked back over the shoulder as the body
+loads back, the strike accelerates into the point you aimed at with the wrist leading and the blade
+snapping after it, the follow-through carries across the body as the weight steps onto the front foot, and
+the fighter settles back into guard. Overheads come down from behind the head, backswings rise from low,
+low cuts are made with bent knees; a longsword is swung in both hands, a shield arm swings against the blow.
+
 With a weapon drawn you face the cursor (and back-pedal if you walk away from it); the point of your blade
 follows the mouse en garde, each blow bends toward where you aim and strikes at that height (head, body or
 legs).

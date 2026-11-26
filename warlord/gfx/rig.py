@@ -196,7 +196,10 @@ def compute_pose(h):
                 p.faf = 1.1 - max(0.0, g) * 0.4
     if act is not None:
         kind = act["kind"]
-        if kind == "attack":
+        if kind == "attack" and not pole and wd is not None and wd.key != "fists" and \
+                act["move"].arc in ("swing", "backswing", "overhead", "low", "stab", "thrust") and h.mount is None:
+            swing_pose(p, h, act, wd)
+        elif kind == "attack":
             mv = act["move"]
             el = act["t"]
             wu, ac, rc = mv.windup, mv.active, mv.recover
@@ -338,6 +341,115 @@ def compute_pose(h):
     if h.stagger > 0 and st != "dead":
         p.lean -= 0.3
     return p
+
+
+# ================================================================== natural melee swings
+def _ease_in(t):
+    return t * t
+
+
+def _ease_out(t):
+    return 1 - (1 - t) * (1 - t)
+
+
+def _swing_keys(s, frames):
+    """Keyframes on the move's phase s (0 start, 1 end of wind-up, 2 end of the strike, 3 recovered).
+    The wind-up eases in and out, the strike accelerates into the impact, the follow-through decelerates."""
+    for i in range(len(frames) - 1):
+        s0, a = frames[i]
+        s1, b = frames[i + 1]
+        if s0 <= s <= s1:
+            t = (s - s0) / max(1e-6, s1 - s0)
+            if s1 <= 1.0 or s0 >= 2.0:
+                t = ease(t)
+            elif s1 <= 1.5:
+                t = _ease_in(t)
+            else:
+                t = _ease_out(t)
+            return {f: a[f] + (b[f] - a[f]) * t for f in a}
+    return dict(frames[-1][1])
+
+
+def swing_pose(p, h, act, wd):
+    """A sword or axe blow that moves like one: cocked back over the shoulder, the body loading back; the
+    strike accelerates through the point you aimed at with the wrist leading and the blade snapping after it;
+    the follow-through carries across the body as the weight goes onto the front foot; then back to guard."""
+    mv = act["move"]
+    el = act["t"]
+    wu, ac, rc = mv.windup, mv.active, mv.recover
+    if el < wu:
+        sp = el / max(1e-6, wu)
+    elif el < wu + ac:
+        sp = 1 + (el - wu) / max(1e-6, ac)
+    else:
+        sp = min(3.0, 2 + (el - wu - ac) / max(1e-6, rc))
+    A = act.get("aim")
+    arc = mv.arc
+    heavy = wd.style in ("axe", "mace", "club", "flail", "hammer") or "two_handed" in wd.flags or \
+        getattr(wd, "two_handed", False)
+    big = 1.15 if heavy else 1.0
+    G = dict(ua=0.55, fa=1.1, wa=-0.95, lean=0.05, step=0.08, drop=0.0)          # en garde
+    if arc == "overhead":
+        a = -0.25 if A is None else max(-0.7, min(0.4, A + 0.3))
+        frames = [(0.0, G),
+                  (0.55, dict(ua=2.2, fa=1.0, wa=-2.2, lean=-0.02, step=0.05, drop=0.0)),
+                  (1.0, dict(ua=2.95, fa=0.75 * big, wa=-3.0 * big, lean=-0.14, step=0.0, drop=0.0)),
+                  (1.3, dict(ua=2.3, fa=0.35, wa=-2.0, lean=0.05, step=0.3, drop=0.5)),     # the wrist leads
+                  (1.55, dict(ua=math.pi / 2 - a + 0.1, fa=0.12, wa=a, lean=0.28, step=0.55, drop=1.5)),
+                  (2.0, dict(ua=0.55, fa=0.3, wa=1.15, lean=0.38, step=0.6, drop=3.0)),     # through and down
+                  (2.45, dict(ua=0.5, fa=0.7, wa=0.4, lean=0.2, step=0.3, drop=1.0)),
+                  (3.0, G)]
+    elif arc == "backswing":
+        a = 0.05 if A is None else max(-0.9, min(0.7, A))
+        frames = [(0.0, G),
+                  (1.0, dict(ua=0.35, fa=0.9, wa=1.35, lean=0.18, step=0.2, drop=1.5)),     # down and back
+                  (1.3, dict(ua=0.85, fa=0.5, wa=1.0, lean=0.12, step=0.3, drop=1.0)),
+                  (1.55, dict(ua=math.pi / 2 - a, fa=0.1, wa=a - 0.15, lean=0.08, step=0.4, drop=0.5)),
+                  (2.0, dict(ua=2.6, fa=0.45, wa=-2.25, lean=-0.1, step=0.3, drop=0.0)),   # rising up and over
+                  (2.5, dict(ua=1.6, fa=0.8, wa=-1.6, lean=0.0, step=0.15, drop=0.0)),
+                  (3.0, G)]
+    elif arc == "low":
+        a = 0.75 if A is None else max(0.3, min(1.1, A))
+        frames = [(0.0, G),
+                  (1.0, dict(ua=1.75, fa=1.05, wa=-1.9 * big, lean=0.3, step=0.4, drop=3.5)),
+                  (1.3, dict(ua=1.3, fa=0.5, wa=-1.0, lean=0.45, step=0.5, drop=4.0)),
+                  (1.55, dict(ua=math.pi / 2 - a, fa=0.1, wa=a, lean=0.55, step=0.6, drop=4.5)),
+                  (2.0, dict(ua=0.25, fa=0.5, wa=1.7, lean=0.5, step=0.55, drop=4.0)),
+                  (2.5, dict(ua=0.45, fa=0.8, wa=0.6, lean=0.25, step=0.3, drop=2.0)),
+                  (3.0, G)]
+    elif arc in ("stab", "thrust"):
+        a = 0.0 if A is None else max(-0.8, min(0.8, A))
+        along = math.pi / 2 - a
+        frames = [(0.0, G),
+                  (1.0, dict(ua=along - 1.35, fa=2.1, wa=a, lean=-0.06, step=0.05, drop=0.0)),   # drawn back to the hip
+                  (1.6, dict(ua=along, fa=0.02, wa=a, lean=0.35, step=0.6, drop=1.0)),           # driven home
+                  (2.0, dict(ua=along - 0.1, fa=0.1, wa=a, lean=0.3, step=0.55, drop=1.0)),
+                  (3.0, G)]
+    else:   # swing: a forehand cut, diagonally down through the aim
+        a = 0.0 if A is None else max(-0.9, min(0.7, A))
+        frames = [(0.0, G),
+                  (1.0, dict(ua=2.45, fa=1.35, wa=-2.35 * big, lean=-0.12, step=0.05, drop=0.0)),   # cocked back
+                  (1.3, dict(ua=2.0, fa=0.7, wa=-1.75, lean=0.0, step=0.3, drop=0.5)),             # wrist leads
+                  (1.55, dict(ua=math.pi / 2 - a + 0.05, fa=0.08, wa=a + 0.1, lean=0.25, step=0.55, drop=1.5)),
+                  (2.0, dict(ua=0.6, fa=0.6, wa=1.25, lean=0.32, step=0.55, drop=2.0)),            # across the body
+                  (2.5, dict(ua=0.5, fa=0.9, wa=0.3, lean=0.15, step=0.3, drop=0.8)),
+                  (3.0, G)]
+    f = _swing_keys(sp, frames)
+    p.uaf, p.faf, p.wa = f["ua"], f["fa"], f["wa"]
+    p.weapon_mode = "hand"
+    p.lean = f["lean"] + (p.lean if p.lean > 0.2 else 0.0) * 0.3
+    if not p.rot and p.hip_y < -10:
+        st_ = f["step"]
+        p.thf = max(p.thf, st_ * 0.9)
+        p.shf = min(p.shf, -0.15 - st_ * 0.6)
+        p.thb = min(p.thb, -st_ * 0.5)
+        p.hip_y += f["drop"]
+    # the other hand: on the grip of a two-handed weapon, else the shield or fist swings against the blow
+    if getattr(wd, "two_handed", False):
+        p.uab, p.fab = p.uaf - 0.15, min(2.6, p.faf + 0.45)
+    elif not p.shield_up:
+        p.uab = 0.9 - (p.uaf - 1.2) * 0.35
+        p.fab = 1.3
 
 
 # ================================================================== aimed tool motions
