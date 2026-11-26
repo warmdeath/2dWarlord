@@ -62,7 +62,7 @@ Python 3.10+. Classic `pygame` 2.x also works (the soft blurs fall back to a sca
 | Key | Action |
 |---|---|
 | A / D, Shift, S, Space, W | walk, run, crouch (run + crouch = slide), jump, climb / swim up |
-| Left mouse / J | attack — the move depends on your state (see Combat) |
+| Left mouse / J | attack **toward the cursor**: point high for an overhead cut, level for a slash or thrust, low for a low cut; the blow lands at the height you aim (see Combat) |
 | Hold left mouse on the world | **fell a tree** (point anywhere on it while standing next to it), **cut a trunk**, **dig** into the ground (straight down if you like), mine ore, break walls — the right tool from your bag is taken automatically, and a hint above the belt says what will happen |
 | Bow | **mouse:** point, hold left to draw, release; a dotted arc shows where the arrow will fly · **keys:** hold J to draw, W/S raise and lower the bow (Shift for fine aim), A/D turn, release J to shoot · crossbow: hold J to aim, release to loose · arrows strike whatever they touch along their flight (head, body, limbs, a beast's neck or flank) |
 | Right mouse / K | block — tap it just before a hit lands to **parry** |
@@ -264,11 +264,23 @@ upper left.
 
 | State | Move |
 |---|---|
-| standing | 3-hit combo: cut, backswing, heavy overhead |
+| standing | aimed with the mouse: high = overhead, level = cut / backswing (or thrust), low = low cut; with J alone the 3-hit combo: cut, backswing, heavy overhead |
 | running | lunge / charge |
 | crouching | low sweep, or a **Konter** (riposte) right after a successful block |
 | in the air | plunging strike |
 | on horseback | couched lance / riding slash, damage grows with speed |
+
+With a weapon drawn you face the cursor (and back-pedal if you walk away from it); the point of your blade
+follows the mouse en garde, each blow bends toward where you aim and strikes at that height (head, body or
+legs).
+
+**Working motions.** Every tool has its own motion, aimed at the point under the cursor, and the arms and
+tool are solved so the head of the tool lands right there: the **shovel** is set, driven in, levered back and
+the earth tossed off the blade onto a heap; the **pick** and the **hoe** come down from over the head; the
+**axe** chops a standing tree from the side at the height you point and splits a lying trunk with downward
+strokes; the **hammer** knocks; the **sickle** sweeps low through the stalks; things you set down are
+reached for and placed. The blow, the bite or the cut happens at the moment of impact in the motion, and the
+shield is slung on the back while both hands are on a tool.
 
 Blocking costs stamina and posture. A **parry** (block in the last instant) staggers the attacker for free.
 Crouching makes you a smaller target: high swings pass over you.

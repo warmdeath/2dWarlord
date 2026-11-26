@@ -71,6 +71,20 @@ class CombatSystem:
         reach = mv.reach
         f = att.facing
         x0 = att.cx if f > 0 else att.cx - reach
+        act = att.action or {}
+        ay = act.get("aim_y")
+        if ay is not None and att.mount is None and mv.arc != "plunge":
+            # an aimed blow lands at the height you pointed at (head, body or legs)
+            c = max(att.y - 8, min(att.feet - 3, ay))
+            if mv.arc in ("thrust", "stab"):
+                top, bot = c - 12, c + 12
+            elif mv.arc == "overhead":
+                top, bot = att.y - 14, max(att.y + 10, c + 12)
+            elif mv.arc == "low":
+                top, bot = min(c - 10, att.feet - 22), att.feet + 4
+            else:
+                top, bot = c - 18, c + 18
+            return (x0, top, reach, bot - top)
         if att.mount is not None:
             top, bot = att.y, att.y + att.h + 30
         elif mv.arc in ("thrust", "stab"):
@@ -121,7 +135,10 @@ class CombatSystem:
                 flags = flags + ("unblockable",) if t.y > att.y + 10 else flags
             high = mv.arc in ("swing", "backswing", "overhead", "plunge")
             if hasattr(t, "take_hit"):
-                if mv.arc == "overhead" or mv.arc == "plunge":
+                ay = (att.action or {}).get("aim_y")
+                if ay is not None and mv.arc in ("swing", "backswing", "thrust", "stab"):
+                    hy = max(t.y, min(t.y + t.h - 1, ay + random.uniform(-5, 5)))
+                elif mv.arc == "overhead" or mv.arc == "plunge":
                     hy = t.y + t.h * random.uniform(0.0, 0.45)
                 elif mv.arc == "low":
                     hy = t.y + t.h * random.uniform(0.55, 0.95)

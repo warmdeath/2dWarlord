@@ -105,6 +105,12 @@ class PlayerController:
         dx = wx - p.cx
         dy = wy - (p.y + 14)
         self.hint = None
+        # the mouse is where your hands and weapon aim; with a weapon drawn (or a tool at work) you face it
+        p.aim_pt = (wx, wy)
+        wdk = p.weapon_def.kind
+        busy_tool = p.action is not None and p.action.get("kind") in ("tool", "attack")
+        p.face_to = (1 if dx > 0 else -1) if abs(dx) > 6 and p.mount is None and (
+            busy_tool or (wdk == "melee" and p.weapon_drawn and p.weapon_key != "fists")) else 0
         if mouse_pos != self.last_mouse:
             if self.last_mouse is not None:
                 self.aim_mode = "mouse"
@@ -174,6 +180,7 @@ class PlayerController:
             if clicked and in_reach and self.place_cd <= 0:
                 if g.place_item(p, held, wx, wy, self.place_angle, anchor=shift or hd.place == "station"):
                     self.place_cd = 0.25
+                    self.tool_motion(p, "place", wx, wy)
             return
         if hd is not None and hd.cat == "heal" and clicked and self.eat_cd <= 0:
             g.bandage(p)
@@ -185,12 +192,13 @@ class PlayerController:
             return
         if clicked and in_reach:
             if p.weapon_key == "hacke" and g.till(wx):
-                p.action = {"kind": "use", "t": 0.0, "dur": 0.4}
+                self.tool_motion(p, "till", wx, g.world.surface_y(wx))
                 return
             if held == "mist" and g.manure(wx):
+                self.tool_motion(p, "place", wx, g.world.surface_y(wx))
                 return
             if p.weapon_key == "sichel" and g.harvest(wx, by=p):
-                p.action = {"kind": "use", "t": 0.0, "dur": 0.35}
+                self.tool_motion(p, "reap", wx, g.world.surface_y(wx) - 6)
                 return
         wd = p.weapon_def
         # what is under the mouse, and what would you use on it?
@@ -218,9 +226,12 @@ class PlayerController:
                 ok = True
             if lmb and self.swing_cd <= 0 and (ok or (clicked and verb == "dig" and wd.key == "fists")):
                 p.facing = 1 if hx > p.cx else -1
-                p.action = {"kind": "use", "t": 0.0, "dur": 0.42 / max(0.5, wd.speed)}
-                self.swing_cd = 0.5 / max(0.5, wd.speed)
-                self.pending_hit = [0.22 / max(0.5, wd.speed), hx, hy]
+                style = self.style_for(verb, wd.key)
+                # the stroke lands where you point (a tree is struck at the height of the cursor)
+                ty = hy if verb != "fell" else max(min(wy, hy + 10), hy - 34)
+                dur, hit = self.tool_motion(p, style, hx, ty, wd.speed)
+                self.swing_cd = dur * 0.98
+                self.pending_hit = [hit, hx, hy]
                 g.sfx("swing")
             elif lmb and not ok and clicked and not owned:
                 if self.need_t <= 0:
@@ -240,6 +251,29 @@ class PlayerController:
                 dmg = max(8.0, wd.dmg) * (0.5 + 0.5 * p.stamina / max(1, p.max_stamina))
                 p.stamina = max(0.0, p.stamina - 4)
                 g.hit_world(p, hx, hy, dmg, wd.dtype if hasattr(wd, "dtype") else "cut")
+
+    @staticmethod
+    def style_for(verb, key):
+        """Which working motion a tool makes on what."""
+        if verb == "dig":
+            return {"schaufel": "shovel", "hacke": "till", "fists": "place"}.get(key, "pick")
+        if verb in ("fell",):
+            return "chop"
+        if verb == "cut":
+            return "buck"
+        if verb == "mine":
+            return "pick"
+        if verb in ("break", "break_wood"):
+            return {"axt": "chop", "hellebarde": "chop", "spitzhacke": "pick"}.get(key, "hammer")
+        return "hammer"
+
+    def tool_motion(self, p, style, tx, ty, speed=1.0):
+        """Start a working motion aimed at (tx, ty); returns (duration, time of the hit)."""
+        from ..gfx.rig import TOOL_DUR, TOOL_HIT
+        dur = TOOL_DUR.get(style, 0.5) / max(0.6, speed)
+        p.facing = 1 if tx > p.cx else -1
+        p.action = {"kind": "tool", "style": style, "t": 0.0, "dur": dur, "tx": tx, "ty": ty}
+        return dur, dur * TOOL_HIT.get(style, 0.5)
 
     @staticmethod
     def suits(key, verb):

@@ -179,6 +179,14 @@ def compute_pose(h):
         else:
             p.uaf, p.faf = 0.55 if st != "run" else p.uaf, 1.1
             p.wa = -0.95
+            ap = getattr(h, "aim_pt", None)
+            if ap is not None and st != "run":
+                # en garde: the point follows where you aim
+                a = _aim_angle(h, p, ap)
+                g = max(-1.4, min(0.9, a))
+                p.wa = -0.95 + (g + 0.95) * 0.75
+                p.uaf = 0.55 - (g + 0.2) * 0.35
+                p.faf = 1.1 - max(0.0, g) * 0.4
     if act is not None:
         kind = act["kind"]
         if kind == "attack":
@@ -218,6 +226,24 @@ def compute_pose(h):
                 p.lean = max(p.lean, 0.3)
             if arc == "overhead" and ph == 1:
                 p.lean = max(p.lean, 0.25)
+            aim = act.get("aim")
+            if aim is not None:
+                # the blow bends toward where you aimed
+                if arc in ("swing", "backswing", "thrust", "stab"):
+                    p.uaf -= aim * 0.8
+                    p.wa += aim * 0.8
+                elif arc == "overhead" and ph >= 1:
+                    p.uaf -= max(-0.3, aim) * 0.5
+                    p.wa += max(-0.3, aim) * 0.5
+                elif arc == "low":
+                    # bend into a low cut
+                    p.lean = max(p.lean, 0.45 * (k if ph == 0 else 1.0))
+                    if not p.rot:
+                        p.hip_y += 3.5 * (k if ph == 0 else 1.0)
+                        p.thf, p.shf = max(p.thf, 0.5), min(p.shf, -0.8)
+                    if ph >= 1:
+                        p.uaf -= (aim - 0.8) * 0.4
+                        p.wa += (aim - 0.8) * 0.4
             if wd is None or wd.key == "fists":
                 p.wa = None
         elif kind == "block":
@@ -276,6 +302,8 @@ def compute_pose(h):
             elif style == "stir":
                 p.uaf = 1.0 + math.sin(ph * math.tau) * 0.3
                 p.faf, p.wa = 0.8, 1.2
+        elif kind == "tool":
+            tool_pose(p, h, act)
         elif kind == "use":
             ph = act["t"] / max(0.01, act["dur"])
             p.uaf = lerp(2.4, 0.7, ease(ph))
@@ -284,6 +312,145 @@ def compute_pose(h):
     if h.stagger > 0 and st != "dead":
         p.lean -= 0.3
     return p
+
+
+# ================================================================== aimed tool motions
+def _shoulder_local(p):
+    return (math.sin(p.lean) * TORSO, p.hip_y + p.bob - math.cos(p.lean) * TORSO)
+
+
+def _aim_angle(h, p, pt):
+    """Weapon-convention angle (0 forward, -pi/2 up) from the shoulder to a world point."""
+    shx, shy = _shoulder_local(p)
+    lx = (pt[0] - h.cx) * h.facing - shx
+    ly = (pt[1] - h.feet) - shy
+    return math.atan2(ly, max(2.0, lx))
+
+
+def _keys(u, frames):
+    """Interpolate keyframes [(u, {field: value})] with easing; returns a dict."""
+    for i in range(len(frames) - 1):
+        u0, a = frames[i]
+        u1, b = frames[i + 1]
+        if u0 <= u <= u1:
+            k = ease((u - u0) / max(1e-6, u1 - u0))
+            return {f: a[f] + (b[f] - a[f]) * k for f in a}
+    return dict(frames[-1][1])
+
+
+# hit moment (fraction of the motion) for each tool style
+TOOL_HIT = {"shovel": 0.42, "pick": 0.55, "chop": 0.55, "buck": 0.55, "hammer": 0.5, "reap": 0.5, "till": 0.5,
+            "place": 0.6, "break": 0.5}
+TOOL_DUR = {"shovel": 0.78, "pick": 0.56, "chop": 0.52, "buck": 0.52, "hammer": 0.42, "reap": 0.45, "till": 0.55,
+            "place": 0.36, "break": 0.5}
+
+
+def solve_reach(sh, tgt, L):
+    """Arm and tool angles that put the tool's head (L from the hand) on the target.
+    sh, tgt: local points (x forward, y down). Returns (upper arm, forearm, tool) angles."""
+    tx, ty = tgt
+    D = math.hypot(tx - sh[0], ty - sh[1])
+    arm = UPPER + FORE - 0.3
+    if D >= arm + L - 0.5 or D < 1:
+        # out of reach: everything in one line toward the target
+        a = math.atan2(tx - sh[0], ty - sh[1])
+        return a, 0.05, math.atan2(ty - sh[1], max(0.5, tx - sh[0]))
+    # the hand lies on the circle of radius r around the shoulder where the tool just reaches the target;
+    # take the higher of the two places (the stroke comes from above)
+    r = max(4.0, min(arm, D - L * 0.35)) if D > L else max(4.0, min(arm, L - D + 4))
+    a_ = (r * r - L * L + D * D) / (2 * D)
+    h2 = r * r - a_ * a_
+    ux, uy = (tx - sh[0]) / D, (ty - sh[1]) / D
+    if h2 < 0:
+        hx, hy = sh[0] + ux * r, sh[1] + uy * r
+    else:
+        hh = math.sqrt(h2)
+        c1 = (sh[0] + ux * a_ - uy * hh, sh[1] + uy * a_ + ux * hh)
+        c2 = (sh[0] + ux * a_ + uy * hh, sh[1] + uy * a_ - ux * hh)
+        hx, hy = c1 if c1[1] < c2[1] else c2
+    # two-bone arm to the hand, elbow below the line
+    d = max(0.5, min(arm, math.hypot(hx - sh[0], hy - sh[1])))
+    a0 = math.atan2(hx - sh[0], hy - sh[1])
+    beta = math.acos(max(-1.0, min(1.0, d / (UPPER + FORE))))
+    ua, fa = a0 + beta, -2 * beta
+    ex, ey = sh[0] + math.sin(ua) * UPPER, sh[1] + math.cos(ua) * UPPER
+    ua2 = a0 - beta
+    ex2, ey2 = sh[0] + math.sin(ua2) * UPPER, sh[1] + math.cos(ua2) * UPPER
+    if ey2 > ey:
+        ua, fa = ua2, 2 * beta
+    wa = math.atan2(ty - hy, tx - hx if abs(tx - hx) > 0.3 else 0.3)
+    return ua, fa, wa
+
+
+def tool_pose(p, h, act):
+    """A working motion that reaches the point you clicked: the arms and tool are solved toward the target.
+
+    Angles: limbs 0 = hanging, +pi/2 = forward, pi = up; the tool 0 = forward, -pi/2 = up."""
+    u = act["t"] / max(0.01, act["dur"])
+    style = act.get("style", "pick")
+    tx, ty = act["tx"], act["ty"]
+    p.weapon_mode = "hand"
+    shx, shy = _shoulder_local(p)
+    lx = (tx - h.cx) * h.facing
+    ly = ty - h.feet
+    low = max(0.0, min(1.0, (ly + 12) / 20.0))          # 1 when the target is down at the feet
+    wd = h.weapon_def
+    L = (wd.length if wd is not None and wd.key != "fists" else 0.0) * 0.86
+    # the pose at the moment of impact: the tool's head on the target (solved with the body already bent
+    # into the blow, so lean and drop are applied before the solve)
+    lean_hit = {"shovel": 0.45, "reap": 0.7, "chop": 0.3}.get(style, 0.35 + 0.25 * low)
+    drop_hit = {"shovel": 4.0, "reap": 6.0}.get(style, 4.0 * low)
+    hip = (0.0, p.hip_y + p.bob + drop_hit)
+    shh = (hip[0] + math.sin(lean_hit) * TORSO, hip[1] - math.cos(lean_hit) * TORSO)
+    th, fh, wt = solve_reach(shh, (lx, ly), L)
+    if style == "shovel":
+        # set the blade, drive it in, lever back, lift and toss the earth forward
+        f = _keys(u, [(0.0, dict(ua=0.9, fa=0.6, wa=1.0, lean=0.1, drop=0.0)),
+                      (0.25, dict(ua=1.5, fa=0.4, wa=0.55, lean=0.05, drop=1.0)),
+                      (0.42, dict(ua=th, fa=fh, wa=wt, lean=lean_hit, drop=drop_hit)),
+                      (0.6, dict(ua=th - 0.3, fa=fh + 0.2, wa=wt - 0.55, lean=0.08, drop=3.0)),
+                      (0.8, dict(ua=2.1, fa=0.3, wa=-0.35, lean=0.25, drop=1.0)),
+                      (1.0, dict(ua=0.9, fa=0.6, wa=1.0, lean=0.1, drop=0.0))])
+    elif style in ("pick", "buck", "hammer", "till"):
+        # raised over the head, then down onto the point; the hoe is pulled back after
+        up = 2.95 if style != "hammer" else 2.55
+        f = _keys(u, [(0.0, dict(ua=1.2, fa=0.6, wa=-1.2, lean=0.05, drop=0.0)),
+                      (0.42, dict(ua=up, fa=0.15, wa=-2.6, lean=-0.12, drop=0.0)),
+                      (TOOL_HIT[style], dict(ua=th, fa=fh, wa=wt, lean=lean_hit, drop=drop_hit)),
+                      (0.75, dict(ua=th - (0.45 if style == "till" else 0.15), fa=fh + 0.2, wa=wt - 0.3,
+                                  lean=0.25 * low, drop=3.0 * low)),
+                      (1.0, dict(ua=1.0, fa=0.6, wa=-0.9, lean=0.05, drop=0.0))])
+    elif style == "chop":
+        # a two-handed side chop: axe back over the shoulder, the body turns into the blow
+        f = _keys(u, [(0.0, dict(ua=1.3, fa=0.5, wa=-0.9, lean=0.05, drop=0.0)),
+                      (0.42, dict(ua=th + 1.0, fa=0.3, wa=wt - 1.7, lean=-0.15, drop=0.0)),
+                      (0.55, dict(ua=th, fa=fh, wa=wt, lean=lean_hit, drop=drop_hit)),
+                      (0.75, dict(ua=th + 0.1, fa=fh + 0.1, wa=wt + 0.15, lean=0.2, drop=1.0)),
+                      (1.0, dict(ua=1.2, fa=0.5, wa=-0.9, lean=0.05, drop=0.0))])
+    elif style == "reap":
+        # bent low, the sickle sweeps through the stalks at the point
+        f = _keys(u, [(0.0, dict(ua=1.0, fa=0.6, wa=-0.4, lean=0.5, drop=4.0)),
+                      (0.35, dict(ua=th - 0.7, fa=0.4, wa=wt - 1.0, lean=0.65, drop=6.0)),
+                      (0.5, dict(ua=th, fa=fh, wa=wt, lean=lean_hit, drop=drop_hit)),
+                      (0.7, dict(ua=th + 0.5, fa=0.3, wa=wt + 0.9, lean=0.6, drop=5.0)),
+                      (1.0, dict(ua=1.0, fa=0.6, wa=-0.4, lean=0.3, drop=2.0))])
+    else:
+        # place / break with the hands: reach out to the point and set it down
+        f = _keys(u, [(0.0, dict(ua=0.8, fa=0.6, wa=-0.6, lean=0.05, drop=0.0)),
+                      (0.6, dict(ua=th, fa=fh, wa=wt, lean=lean_hit, drop=drop_hit)),
+                      (1.0, dict(ua=0.9, fa=0.6, wa=-0.6, lean=0.1, drop=1.0 * low))])
+    p.uaf, p.faf, p.wa = f["ua"], f["fa"], f["wa"]
+    p.lean = max(p.lean, f["lean"]) if f["lean"] > 0 else f["lean"]
+    if p.rot == 0:
+        p.hip_y += f["drop"]
+        if f["drop"] > 1.5:
+            p.thf, p.shf = max(p.thf, 0.45), min(p.shf, -0.7)
+            p.thb, p.shb = max(p.thb, 0.25), min(p.shb, -0.6)
+    # the other hand holds the shaft of a two-handed tool
+    if style in ("shovel", "pick", "chop", "buck", "till"):
+        p.uab, p.fab = p.uaf - 0.25, p.faf + 0.55
+    else:
+        p.uab, p.fab = 0.3, 0.3
 
 
 # ================================================================== pose blending
@@ -523,6 +690,9 @@ def _draw_humanoid(surf, h, sx, sy, scale, tint, ss, osx, osy):
             _draw_shield(surf, h, (hip[0] - f * 11 * S, hip[1] + 10 * S), f, S * 0.9, raised=False)
             pygame.draw.line(surf, (70, 46, 28), (hip[0] - f * 6 * S, hip[1] + 1 * S),
                              (hip[0] - f * 11 * S, hip[1] + 5 * S), max(1, int(S * 0.6)))
+        elif h.action is not None and h.action.get("kind") == "tool":
+            # both hands on a tool: the shield is slung on the back
+            _draw_shield(surf, h, (sh[0] - f * 4 * S, sh[1] + 6 * S), f, S * 0.9, raised=False)
         else:
             _draw_shield(surf, h, J["hb"], f, S, raised=False)
     # -------------------------------------------------- torso

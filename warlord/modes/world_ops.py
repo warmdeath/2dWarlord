@@ -117,6 +117,14 @@ class WorldOps:
         w.wind = self.env.wind
         w.step(dt)
         w.earth.update(dt, p.mount.cx if p.mount is not None else p.cx)
+        tosses = self.__dict__.get("_tosses")
+        if tosses:
+            for tz in list(tosses):
+                tz[0] -= dt
+                if tz[0] <= 0:
+                    tosses.remove(tz)
+                    _, fx, sy, area, kind, f = tz
+                    w.earth.spawn(fx, sy, area, kind, f * 1.4, 6, lift=1.2)
         hits = getattr(w.space, "impacts", None)
         if hits:
             for e, ke in hits[:8]:
@@ -225,7 +233,10 @@ class WorldOps:
             # a shovel lifts the earth out over the far rim and tosses it onto a heap beyond the hole
             fx = x + h.facing * r * 1.1
             sy = min(y - r * 0.3, w.surface_y(fx) - 8)
-            w.earth.spawn(fx, sy, area, kind, h.facing * 1.4, r * 0.4, lift=1.2)
+            # the earth leaves the blade at the top of the toss, a moment after it bites
+            act = h.action if h.action is not None and h.action.get("kind") == "tool" else None
+            delay = max(0.0, act["dur"] * 0.74 - act["t"]) if act else 0.0
+            self.__dict__.setdefault("_tosses", []).append([delay, fx, sy, area, kind, h.facing])
         else:
             # a pick breaks it loose where it is
             w.earth.spawn(x, y - r * 0.3, area, kind, rng.uniform(-0.4, 0.4), r * 0.6)

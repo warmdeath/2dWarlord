@@ -168,7 +168,27 @@ class Humanoid(Body):
                 self.combo = 0
             mv = moves["combo"][self.combo % 3]
             self.combo += 1
+        aim = None
+        ap = getattr(self, "aim_pt", None)
+        if ap is not None and self.mount is None and mv is not moves.get("riposte") and mv is not moves.get("air"):
+            # where you point decides the blow: high = overhead, level = slash or thrust, low = low cut
+            dx = max(6.0, (ap[0] - self.cx) * self.facing)
+            dy = ap[1] - (self.y + 12)
+            aim = max(-1.3, min(1.1, math.atan2(dy, dx)))
+            if mv is not moves.get("run"):
+                combo = moves["combo"]
+                level = [m for m in combo if m.arc in ("swing", "backswing", "thrust", "stab")] or combo
+                high = [m for m in combo if m.arc == "overhead"]
+                if aim < -0.55 and high:
+                    mv = high[0]
+                elif aim > 0.5 and "crouch" in moves:
+                    mv = moves["crouch"]
+                else:
+                    mv = level[(self.combo - 1) % len(level)]
         self.action = {"kind": "attack", "move": mv, "t": 0.0, "lunged": False}
+        if aim is not None:
+            self.action["aim"] = aim
+            self.action["aim_y"] = ap[1]
         self.hit_ids = set()
         self.stamina -= wd.stamina * mv.stamina * (0.6 if self.mount else 1.0)
         self.blocking = False
@@ -375,6 +395,10 @@ class Humanoid(Body):
                 self.facing = 1 if it.mx > 0 else -1
             elif it.mx != 0 and self.action and self.action["kind"] in ("bow", "crossbow"):
                 pass
+        # weapon drawn or tool in use: face where you aim (you may back-pedal)
+        ft = getattr(self, "face_to", 0)
+        if ft and self.mount is None:
+            self.facing = ft
         if it.run and abs(self.vx) > WALK_SPEED and self.on_ground:
             self.stamina -= 9 * dt
         # --- slide: crouch while running
@@ -428,7 +452,7 @@ class Humanoid(Body):
             self.start_attack(game)
         if self.action is not None and self.action["kind"] == "attack":
             self._advance_attack(game, dt)
-        if self.action is not None and self.action["kind"] == "use":
+        if self.action is not None and self.action["kind"] in ("use", "tool"):
             self.action["t"] += dt
             if self.action["t"] >= self.action["dur"]:
                 self.action = None
