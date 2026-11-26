@@ -72,7 +72,7 @@ Python 3.10+. Classic `pygame` 2.x also works. F11 toggles fullscreen, F3 shows 
 | I · B · M · N · R | the Rucksack & crafting · blueprints · world map · Wörterbuch (Q = quiz) · Ständeordnung |
 | X · Tab · Z | formation orders · select formation · commander's zoomed-out view |
 | F5 / F9 · Esc · H | save / load · pause · help |
-| F7 | try the character looks: classic, storybook, ink, oil |
+| F7 | switch the character look: ink (default), manga, storybook, oil, classic |
 
 ## The polygon world (round 3)
 
@@ -143,6 +143,10 @@ upper left.
 
 ![people](docs/screenshots/56_people.jpg)
 
+| | |
+|---|---|
+| ![manga](docs/screenshots/58_manga.jpg) | ![manga swing](docs/screenshots/59_manga_swing.jpg) |
+
 - **Trees.** Every tree grows a skeleton of branching limbs from its seed, with roots flaring into the soil and
   bark fissures (or the black marks on a birch). Its crown is a pile of leafy clumps, each painted like a ball
   lit from the upper left: a dark mass, softened like wet paint, a mid-tone cap and crisp sunlit leaves on top,
@@ -154,6 +158,16 @@ upper left.
 - **Plants.** Bushes are small painted crowns with berries in summer; ferns unfurl leaflet by leaflet;
   flowers have petals, heather is a haze of purple; reeds carry cattails; grass grows in tufts of curved blades,
   dark at the root and sunlit at the tip, with patches of tall seeding grass in the meadows.
+- **Character looks (F7).** People are drawn with anatomical outlines instead of tubes: a thigh swells at
+  the front, a calf at the back, a forearm thickens below the elbow and narrows to the wrist; the torso has a
+  chest, a waist and hips; the head is a true profile with brow, nose, lips and chin; hands are mittens with
+  a thumb and shoes have a heel and a toe; hoods and helmets have smooth outlines. Five looks share the same
+  skeleton: **ink** (the default: graphic-novel proportions, ink outlines heavier on the shadow side, hard
+  shadows), **manga** (after the war epics of Japanese comics: lean, broad-shouldered and long-legged with
+  a small head, bold ink, shadows hatched at the edges, sharp eyes under angled brows, spiky wind-swept hair,
+  some tied in a streaming tail, sashes that fly out behind, inked speed lines on every swing),
+  **storybook** (rounded, a big eye, warm outlines), **oil** (no outlines, soft painterly shading, a rim of
+  light) and **classic** (the round capsules of round 5).
 - **People.** Figures are painted at twice their size and shrunk smoothly, so edges are clean and small
   details survive: a rounded head with an eye that catches the light, brow, nose, ear and a blush on the cheek;
   hair and beards in strands; cloth that folds below the belt, a neckline, a buckle and a purse; mail in rows of

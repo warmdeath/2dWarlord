@@ -8,6 +8,9 @@ brow, a nose, lips and a chin, hands are mittens with a thumb and shoes have a h
   storybook  "Bilderbuch" — rounded and friendly, a big expressive eye, warm outlines, soft shading
   ink        "Tusche"     — graphic-novel: realistic proportions, ink outlines, hard cel shadows
   oil        "Ölbild"     — painterly: no outlines, soft three-tone shading, a warm rim of light
+  manga      "Manga"      — after the war epics of Japanese comics: lean and tall with a small head, bold
+                            tapered ink, hard shadows hatched at the edges, sharp eyes under angled brows,
+                            spiky wind-swept hair (some tied in a flowing tail), sashes streaming behind
 
 Every shape (limb, torso, head, hand, shoe) is shaded by one routine: the outline's normals tell which side
 faces the light (upper left); the far side gets a shadow crescent, the near side a rim of light.
@@ -18,12 +21,12 @@ import pygame
 
 from .paint import LIGHT, warm, mix, shade
 
-ORDER = ("classic", "storybook", "ink", "oil")
-STYLE = ["classic"]
+ORDER = ("ink", "manga", "storybook", "oil", "classic")
+STYLE = ["ink"]
 
 
 class Style:
-    def __init__(self, name, head, outline, ink, shadow, rim, two_tone, blur, eye, build):
+    def __init__(self, name, head, outline, ink, shadow, rim, two_tone, blur, eye, build, hatch=False):
         self.name = name
         self.head = head            # head size relative to the skeleton's
         self.outline = outline      # outline width at the final size (px), 0 = none
@@ -34,12 +37,14 @@ class Style:
         self.blur = blur            # soften the whole figure (painterly)
         self.eye = eye
         self.build = build          # limb thickness
+        self.hatch = hatch          # ink hatching in the shadows (manga)
 
 
 STYLES = {
     "storybook": Style("storybook", 1.0, 0.95, None, 0.4, 0.16, False, 0, "big", 1.08),
     "ink": Style("ink", 0.8, 1.0, (40, 30, 30), 0.5, 0.0, False, 0, "line", 0.92),
     "oil": Style("oil", 0.86, 0.0, None, 0.46, 0.26, True, 1, "real", 0.96),
+    "manga": Style("manga", 0.74, 1.1, (22, 16, 20), 0.52, 0.07, False, 0, "manga", 0.88, hatch=True),
 }
 
 
@@ -72,7 +77,7 @@ def _normals(pts):
     return out
 
 
-def shape(surf, pts, col, st, S, depth, flat=False):
+def shape(surf, pts, col, st, S, depth, flat=False, hatch=True):
     """Fill a closed outline with shading from the upper left.
     depth: the shape's local half-width in pixels (how deep the shadow can reach)."""
     if len(pts) < 3:
@@ -86,9 +91,13 @@ def shape(surf, pts, col, st, S, depth, flat=False):
     R = depth * st.rim * 2.0
     if st.name == "ink":
         sh_col = mix(shade(col, 0.72), (40, 46, 90), 0.18)
+    elif st.name == "manga":
+        sh_col = mix(shade(col, 0.6), (30, 34, 74), 0.24)
     else:
         sh_col = warm(col, -0.28)
     rim_col = mix(warm(col, 0.28), (255, 238, 205), 0.25 if st.name == "oil" else 0.1)
+    if st.name == "manga":
+        rim_col = mix(col, (255, 255, 255), 0.55)
     pygame.draw.polygon(surf, sh_col, pts)
     if st.two_tone:
         mid = [(x - nx * D * max(0.0, -l) * 0.55, y - ny * D * max(0.0, -l) * 0.55)
@@ -105,6 +114,16 @@ def shape(surf, pts, col, st, S, depth, flat=False):
         oc = st.ink if st.ink is not None else shade(col, 0.42)
         lw = max(1, int(round(st.outline * S)))
         pygame.draw.polygon(surf, oc, pts, lw)
+        if st.hatch and hatch and D > 3:
+            # parallel hatching strokes reaching in from the shadowed edge
+            hl = max(1, int(S * 0.35))
+            for i in range(0, len(pts), 2):
+                l = lit[i]
+                if l < -0.45:
+                    nx, ny = ns[i]
+                    ln = D * (0.5 + 0.6 * (-l - 0.45))
+                    x, y = pts[i]
+                    pygame.draw.line(surf, oc, (x, y), (x - nx * ln + LIGHT[0] * ln * 0.3, y - ny * ln + LIGHT[1] * ln * 0.3), hl)
         if st.ink is not None:
             # ink is heavier on the shadow side
             for i in range(len(pts)):
@@ -186,18 +205,33 @@ def limb(surf, a, b, prof, col, f, S, st, k=1.0, **kw):
 def torso_outline(Tt, tl, hem, robe, S, st):
     """Profile of a body in a tunic: nape, upper back, small of the back, seat, hem; throat, chest, belly."""
     flare = 6.6 if robe else 5.9
-    chest = 5.0 if st.name != "ink" else 5.3
-    back = -4.7 if st.name != "ink" else -5.0
-    ctrl = [(-2.2, -tl - 0.9), (back + 0.4, -tl * 0.86), (back, -tl * 0.55), (back + 0.8, -tl * 0.2),
-            (-4.8, 0.4), (-flare * 0.92, hem * 0.55), (-flare, hem), (0.0, hem + 0.7), (flare * 0.96, hem),
-            (flare * 0.82, hem * 0.45), (4.4, 0.2), (3.9, -tl * 0.2), (chest, -tl * 0.55), (chest - 0.5, -tl * 0.8),
-            (1.9, -tl - 0.7)]
+    chest = 5.0 if st.name not in ("ink", "manga") else 5.3
+    back = -4.7 if st.name not in ("ink", "manga") else -5.0
+    waist_f, waist_b = 3.9, back + 0.8
+    if st.name == "manga":
+        # a heroic V: broad shoulders, a narrow waist, a short tunic that shows long legs
+        back, chest = -5.4, 5.5
+        waist_f, waist_b = 3.4, -3.9
+        if not robe:
+            hem, flare = 4.6, 5.2
+    ctrl = [(-2.2, -tl - 0.9), (back + 0.4, -tl * 0.86), (back, -tl * 0.55), (waist_b, -tl * 0.2),
+            (-4.6 if st.name == "manga" else -4.8, 0.4), (-flare * 0.92, hem * 0.55), (-flare, hem), (0.0, hem + 0.7),
+            (flare * 0.96, hem), (flare * 0.82, hem * 0.45), (4.2 if st.name == "manga" else 4.4, 0.2),
+            (waist_f, -tl * 0.2), (chest, -tl * 0.55), (chest - 0.5, -tl * 0.8), (1.9, -tl - 0.7)]
     from .quadruped import smooth_closed
     return [Tt(x * S, y * S) for x, y in smooth_closed(ctrl, 3)]
 
 
-def head_outline(T, r):
+MANGA_HEAD = [(0.2, -5.4), (2.6, -4.8), (3.9, -3.1), (4.15, -1.5), (3.95, -0.8), (4.5, 0.3), (5.1, 1.0),
+              (4.4, 1.35), (4.45, 2.1), (4.15, 2.6), (4.15, 3.3), (3.2, 4.55), (1.2, 4.2), (-0.3, 2.9),
+              (-2.2, 2.5), (-4.0, 1.2), (-4.7, -1.1), (-3.7, -4.0)]
+
+
+def head_outline(T, r, st=None):
     """The head in profile: crown, forehead, brow, nose, lips, chin, jaw, back of the skull."""
+    if st is not None and st.name == "manga":
+        from .quadruped import smooth_closed
+        return [T(x * r, y * r) for x, y in smooth_closed(MANGA_HEAD, 2)]
     ctrl = [(0.2, -5.3), (2.7, -4.7), (4.0, -3.0), (4.25, -1.5), (4.0, -0.85), (4.6, 0.2), (5.35, 1.15),
             (4.45, 1.45), (4.55, 2.25), (4.25, 2.75), (4.4, 3.45), (3.6, 4.55), (1.4, 4.7), (-0.4, 3.4),
             (-2.2, 2.6), (-4.0, 1.3), (-4.7, -1.0), (-3.7, -3.9)]
@@ -297,6 +331,9 @@ def draw_humanoid_styled(surf, h, sx, sy, scale, tint, ss, st):
             R._draw_shield(surf, h, J["hb"], f, S, raised=False)
     # -------------------------------------------------- torso
     Tt = R.frame(hip, fwd, down)
+    if st.name == "manga" and not flat and not L.get("robe"):
+        sc_ = L.get("trim") or (L.get("tabard") or (None,))[0] or (176, 40, 38)
+        sash(surf, h, Tt, S, st, sc_)
     tl = ul / S
     robe = L.get("robe", False)
     hem = 17 if robe else 6.0
@@ -359,11 +396,11 @@ def draw_head(surf, h, T, r, st, tint, flat):
     from . import rig as R
     L = h.look
     skin = L["skin"] if not tint else tint
-    pts = head_outline(T, r)
+    pts = head_outline(T, r, st)
     if flat:
         pygame.draw.polygon(surf, skin, pts)
         return
-    shape(surf, pts, skin, st, r, 3.2 * r)
+    shape(surf, pts, skin, st, r, 3.2 * r, hatch=False)
     ink = st.ink if st.ink is not None else shade(skin, 0.45)
     lw = max(1, int(r * 0.45))
     hair = L["hair"]
@@ -384,6 +421,28 @@ def draw_head(surf, h, T, r, st, tint, flat):
         pygame.draw.circle(surf, mix(skin, (220, 100, 96), 0.3), T(3.0 * r, 1.4 * r), r * 0.9)
         pygame.draw.arc(surf, shade(skin, 0.55), pygame.Rect(T(3.4 * r, 2.4 * r), (0, 0)).inflate(r * 1.4, r * 0.8),
                         math.pi, math.tau, max(1, int(r * 0.3)))
+    elif st.eye == "manga":
+        r0 = r
+        r = r * 1.3
+        ex, ey = ex / 1.3 + 0.05, ey / 1.3 - 0.1
+        # a sharp, intense eye: heavy upper lid with a flick at the outer corner, a dark iris with a glint,
+        # a short lower lid, and a brow that drives down toward the nose
+        lid = [T((ex - 0.95) * r, (ey - 0.05) * r), T((ex - 0.2) * r, (ey - 0.45) * r), T((ex + 0.75) * r, (ey - 0.4) * r)]
+        pygame.draw.polygon(surf, (250, 248, 244), [lid[0], lid[1], lid[2], T((ex + 0.5) * r, (ey + 0.35) * r),
+                                                     T((ex - 0.5) * r, (ey + 0.3) * r)])
+        pygame.draw.circle(surf, (40, 26, 22), T((ex + 0.25) * r, (ey - 0.05) * r), r * 0.42)
+        pygame.draw.circle(surf, (255, 255, 255), T((ex + 0.35) * r, (ey - 0.2) * r), max(1.0, r * 0.14))
+        pygame.draw.lines(surf, ink, False, lid, lw + 1)
+        pygame.draw.line(surf, ink, lid[0], T((ex - 1.4) * r, (ey - 0.4) * r), lw)           # the flick
+        pygame.draw.line(surf, ink, T((ex - 0.3) * r, (ey + 0.4) * r), T((ex + 0.45) * r, (ey + 0.36) * r),
+                         max(1, lw - 1))
+        r = r0
+        brow = [T(1.3 * r, -2.2 * r), T(2.6 * r, -1.9 * r), T(4.1 * r, -1.2 * r), T(2.6 * r, -1.55 * r)]
+        pygame.draw.polygon(surf, shade(hair, 0.5), brow)
+        r = r0
+        pygame.draw.line(surf, ink, T(4.95 * r, 1.0 * r), T(4.4 * r, 1.35 * r), max(1, lw - 1))     # nose tip
+        pygame.draw.line(surf, ink, T(3.75 * r, 2.4 * r), T(4.35 * r, 2.35 * r), max(1, lw - 1))    # mouth
+        pygame.draw.line(surf, mix(skin, (40, 40, 80), 0.3), T(1.2 * r, 4.1 * r), T(-0.2 * r, 2.9 * r), lw)
     elif st.eye == "line":
         a, b = T((ex - 0.7) * r, (ey + 0.1) * r), T((ex + 0.6) * r, (ey - 0.15) * r)
         pygame.draw.line(surf, ink, a, b, lw)
@@ -409,6 +468,10 @@ def draw_head(surf, h, T, r, st, tint, flat):
             pygame.draw.line(surf, warm(hair, 0.22), T((1.0 + k) * r, 3.0 * r), T((0.8 + k) * r, 5.0 * r),
                              max(1, int(r * 0.3)))
     hel = h.helmet
+    if st.name == "manga" and not hel and L.get("hat") in (None, "", "tonsure", "crown", "coronet", "cap"):
+        manga_hair(surf, h, T, r, st, hair, L)
+        R._hat(surf, T, r, L)
+        return
     if hel:
         R._helmet(surf, T, r, R.HELMETS[hel][1], L)
     else:
@@ -421,3 +484,68 @@ def draw_head(surf, h, T, r, st, tint, flat):
             pygame.draw.line(surf, warm(hair, 0.22) if st.name != "ink" else shade(hair, 0.6), a, b,
                              max(1, int(r * 0.35)))
         R._hat(surf, T, r, L)
+
+
+def manga_hair(surf, h, T, r, st, hair, L):
+    """Spiky hair swept back by the wind, a bright band where the light rings it, bangs over the brow;
+    some wear it long and tied, the tail streaming behind them."""
+    seed = sum(L["hair"]) + sum(L["skin"]) * 3
+    vx = abs(getattr(h, "vx", 0.0))
+    t = getattr(h, "anim_t", 0.0)
+    sweep = 0.25 + min(0.6, vx / 300.0)                 # the faster, the further back
+    pts = []
+    n = 7
+    for i in range(n + 1):
+        # around the skull from the brow (front-top) over the crown to the nape
+        a = -0.3 * math.pi - (0.95 * math.pi) * i / n       # 0 = forward, -pi/2 = up, -pi = back
+        ca, sa = math.cos(a), math.sin(a)
+        base = 5.05
+        pts.append((ca * base, sa * base * 1.04))
+        if 0 < i < n:
+            m = a - 0.95 * math.pi / n * 0.5
+            ln = 1.8 + 2.4 * ((seed * (i + 3)) % 7) / 7.0
+            ex, ey = math.cos(m) * (base + ln), math.sin(m) * (base + ln)
+            ex -= sweep * ln * 1.3                          # swept back
+            ey += sweep * ln * 0.3 + math.sin(t * 6 + i) * 0.15 * vx / 200
+            pts.append((ex, ey))
+    # down the back of the neck, then forward above the ear to the temple
+    pts += [(-4.9, 1.6), (-4.6, 3.2), (-3.4, 2.4), (-2.4, 0.4), (-1.2, -1.6), (0.8, -2.4)]
+    # bangs falling over the brow
+    pts += [(1.9, -1.4), (2.5, -2.7), (3.3, -1.6), (3.9, -3.0), (4.5, -2.4), (4.4, -3.9)]
+    W = [T(x * r, y * r) for x, y in pts]
+    if (seed % 3) == 0:
+        # a tied tail streaming behind
+        root = (-3.6, -3.4)
+        tail = [root]
+        for k in range(1, 7):
+            u = k / 6
+            tail.append((root[0] - u * (5.5 + 5 * sweep), root[1] + u * (3.5 - 2.5 * sweep) + math.sin(t * 5 - u * 3) * u * 0.9))
+        left = [(x, y - (1.0 - k / 6) * 1.1) for k, (x, y) in enumerate(tail)]
+        right = [(x, y + (1.0 - k / 6) * 1.1) for k, (x, y) in enumerate(tail)]
+        tw = [T(x * r, y * r) for x, y in left + right[::-1]]
+        shape(surf, tw, hair, st, r, 1.0 * r)
+        tie = T(root[0] * r, root[1] * r)
+        pygame.draw.circle(surf, L.get("trim") or (170, 40, 36), tie, r * 0.55)
+    shape(surf, W, hair, st, r, 2.2 * r, hatch=False)
+    # the ring of light on the hair
+    band = [T(math.cos(a) * 4.2 * r - 0.3 * r, math.sin(a) * 4.3 * r) for a in
+            [-0.45 * math.pi - 0.08 * k for k in range(8)]]
+    pygame.draw.lines(surf, mix(hair, (255, 255, 255), 0.45), False, band, max(1, int(r * 0.45)))
+
+
+def sash(surf, h, Tt, S, st, color):
+    """A sash knotted at the waist, its two ends streaming out behind."""
+    vx = abs(getattr(h, "vx", 0.0))
+    t = getattr(h, "anim_t", 0.0)
+    lift = min(1.0, vx / 240.0)
+    for j, (ln, ph) in enumerate(((14.0, 0.0), (10.5, 1.7))):
+        pts_l, pts_r = [], []
+        for k in range(7):
+            u = k / 6
+            x = -4.6 - u * ln * (0.55 + 0.45 * lift)
+            y = 0.2 + u * ln * (0.85 - 0.75 * lift) + math.sin(t * 6 + ph - u * 4) * u * (0.6 + 1.4 * lift)
+            w = 1.4 * (1 - u * 0.45)
+            pts_l.append((x, y - w))
+            pts_r.append((x, y + w))
+        W = [Tt(x * S, y * S) for x, y in pts_l + pts_r[::-1]]
+        shape(surf, W, shade(color, 1.0 - 0.12 * j), st, S, 0.9 * S)

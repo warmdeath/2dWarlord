@@ -644,13 +644,22 @@ def held_weapon(surf, h, J, p, wd, S, f, sx, sy, ss, rd, tint):
         elif trail:
             trail.pop(0)
         if trail and len(trail) > 1:
+            st = figure.current()
+            manga = st is not None and st.name == "manga"
             for i in range(len(trail) - 1):
                 a, b = trail[i], trail[i + 1]
                 k = (i + 1) / len(trail)
-                c = (235, 238, 250, int(60 + 120 * k))
+                c = (235, 238, 250, int(60 + 120 * k)) if not manga else (255, 255, 255, int(120 + 135 * k))
                 pts = [to_s(a[:2]), to_s(b[:2]), to_s(((b[0] + b[2]) / 2, (b[1] + b[3]) / 2)),
                        to_s(((a[0] + a[2]) / 2, (a[1] + a[3]) / 2))]
                 pygame.draw.polygon(surf, c, pts)
+                if manga:
+                    # an inked edge on the blade's arc and speed lines streaming off it
+                    pygame.draw.line(surf, st.ink, pts[0], pts[1], max(1, int(S * 0.6)))
+                    for q in (0.25, 0.6):
+                        m0 = (pts[0][0] + (pts[3][0] - pts[0][0]) * q, pts[0][1] + (pts[3][1] - pts[0][1]) * q)
+                        m1 = (pts[1][0] + (pts[2][0] - pts[1][0]) * q, pts[1][1] + (pts[2][1] - pts[1][1]) * q)
+                        pygame.draw.line(surf, st.ink, m0, m1, max(1, int(S * 0.3)))
         _draw_weapon(surf, wd, hfp, tip, f, S, draw=p.draw, h=h, hand2=J["hb"])
 
 
