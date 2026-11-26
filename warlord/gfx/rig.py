@@ -12,6 +12,7 @@ import pygame
 
 from ..combat.weapons import HELMETS
 from . import paint
+from . import figure
 
 THIGH, SHIN = 9.5, 9.5
 TORSO = 15.0
@@ -445,7 +446,13 @@ def draw_humanoid(surf, h, sx, sy, scale=1.0, tint=None):
     top = int(R + 30 * scale)
     bot = int(R * 0.6 + 8)
     canvas = paint.CANVAS.get(2 * R * SSf, (top + bot) * SSf)
-    _draw_humanoid(canvas, h, R * SSf, top * SSf, scale * SSf, tint, SSf, sx, sy)
+    st = figure.current()
+    if st is None:
+        _draw_humanoid(canvas, h, R * SSf, top * SSf, scale * SSf, tint, SSf, sx, sy)
+    else:
+        figure.draw_humanoid_styled(canvas, h, R * SSf, top * SSf, scale * SSf, tint, SSf, st)
+        if st.blur and not tint:
+            canvas = pygame.transform.gaussian_blur(canvas, st.blur)
     small = paint.shrink(canvas, SSf)
     surf.blit(small, (int(sx) - R, int(sy) - top))
 
@@ -512,50 +519,7 @@ def _draw_humanoid(surf, h, sx, sy, scale, tint, ss, osx, osy):
         poly(surf, Tt, torso, body_c)
     else:
         painted(surf, Tt, torso, body_c, 0.9, S)
-        if armor is not None and armor.style == "mail":
-            for k in range(1, 6):
-                y = -tl * S * k / 6
-                pygame.draw.line(surf, shade(body_c, 0.8), Tt(-4.4 * S, y), Tt(4.4 * S, y), max(1, int(S * 0.5)))
-            for k in range(-2, 3):
-                pygame.draw.line(surf, shade(body_c, 1.12), Tt(k * 1.8 * S, -tl * S * 0.9), Tt(k * 1.8 * S, -tl * S * 0.1),
-                                 max(1, int(S * 0.3)))
-        if armor is not None and armor.style == "plate":
-            painted(surf, Tt, [(-3.6 * S, -tl * 0.88 * S), (3.8 * S, -tl * 0.88 * S), (4.4 * S, -tl * 0.4 * S),
-                               (3.4 * S, -tl * 0.12 * S), (-3.8 * S, -tl * 0.15 * S)], shade(body_c, 1.08), 0.6, S)
-            pygame.draw.line(surf, paint.warm(body_c, 0.5), Tt(1.6 * S, -tl * 0.8 * S), Tt(2.6 * S, -tl * 0.35 * S),
-                             max(1, int(S * 0.7)))
-        tab = L.get("tabard")
-        if tab:
-            c1, c2 = tab
-            tb = [(-3.4 * S, -tl * 0.95 * S), (3.4 * S, -tl * 0.95 * S), (4.0 * S, hem * 0.9 * S),
-                  (-4.2 * S, hem * 0.9 * S)]
-            painted(surf, Tt, tb, c1, 0.7, S)
-            poly(surf, Tt, [(0, -tl * 0.74 * S), (1.7 * S, -tl * 0.52 * S), (0, -tl * 0.3 * S),
-                            (-1.7 * S, -tl * 0.52 * S)], c2)
-        elif not plated:
-            # cloth folds: soft creases falling from the belt and across the chest
-            fc = paint.warm(body_c, -0.28)
-            w_ = max(1, int(S * 0.6))
-            for fx_ in (-2.2, 0.8, 3.4):
-                pygame.draw.line(surf, fc, Tt(fx_ * S, 1.0 * S), Tt((fx_ + 0.6) * S, (hem - 0.8) * S), w_)
-            pygame.draw.line(surf, fc, Tt(-3.4 * S, -tl * 0.62 * S), Tt(1.0 * S, -tl * 0.5 * S), w_)
-            # the neckline
-            pygame.draw.line(surf, shade(body_c, 0.6), Tt(0.4 * S, -tl * S), Tt(2.6 * S, -tl * 0.82 * S),
-                             max(1, int(S * 0.7)))
-        trim = L.get("trim")
-        if trim:
-            pygame.draw.line(surf, trim, Tt(-hw * S, hem * S), Tt(hw * S, hem * S), max(1, int(S)))
-            pygame.draw.line(surf, trim, Tt(-4.4 * S, -tl * S), Tt(3.0 * S, -tl * S), max(1, int(S)))
-        belt = L.get("belt", (70, 50, 30))
-        pygame.draw.line(surf, belt, Tt(-4.9 * S, -0.5 * S), Tt(4.7 * S, -0.5 * S), max(2, int(S * 1.2)))
-        bk = Tt(3.0 * S, -0.5 * S)
-        pygame.draw.rect(surf, (186, 160, 90), (bk[0] - S * 0.8, bk[1] - S * 0.8, S * 1.6, S * 1.6),
-                         max(1, int(S * 0.4)))
-        if L.get("purse", True) and not plated:
-            pp = Tt(-2.0 * S, 1.6 * S)
-            pygame.draw.ellipse(surf, shade(belt, 1.25), (pp[0] - S * 1.2, pp[1] - S, S * 2.4, S * 2.8))
-        if inj.get("torso", 0) >= 1:
-            pygame.draw.circle(surf, (130, 20, 20), Tt(1.0 * S, -tl * 0.45 * S), max(1, int((1 + inj["torso"]) * S * 0.8)))
+        torso_details(surf, Tt, L, armor, plated, body_c, tl, hem, hw, S, inj)
     # -------------------------------------------------- front leg
     quad(surf, hip, J["kf"], 3.0 * S, 2.3 * S, hose)
     quad(surf, J["kf"], J["ff"], 2.3 * S, 1.8 * S, hose)
@@ -588,6 +552,71 @@ def _draw_humanoid(surf, h, sx, sy, scale, tint, ss, osx, osy):
     hfp = J["hf"]
     if inj.get("arm_w", 0) >= 1 and not tint:
         pygame.draw.circle(surf, (130, 20, 20), J["ef"], (1 + inj["arm_w"]) * S * 0.7)
+    held_weapon(surf, h, J, p, wd, S, f, sx, sy, ss, rd, tint)
+    # the hand over the grip
+    pygame.draw.circle(surf, shade(skin, 0.5), hfp, 1.9 * S)
+    pygame.draw.circle(surf, skin, hfp, 1.9 * S - _EDGE[0])
+    pygame.draw.circle(surf, paint.warm(skin, 0.15), (hfp[0] + LIGHT[0] * S * 0.6, hfp[1] + LIGHT[1] * S * 0.6), S * 0.8)
+    if p.shield_up and h.shield is not None and not tint:
+        _draw_shield(surf, h, (hfp[0] + 2 * f * S, hfp[1] - 3 * S), f, S, raised=True)
+    if h.hurt_flash > 0:
+        pygame.draw.circle(surf, (255, 255, 255), head, HEAD_R * S + S, max(1, int(S)))
+
+
+def torso_details(surf, Tt, L, armor, plated, body_c, tl, hem, hw, S, inj, shaper=None):
+    """Armour, tabard, folds, trim, belt and purse over a torso, in the torso's frame Tt."""
+    if shaper is None:
+        def shaper(pts, c, k=0.9):
+            painted(surf, Tt, pts, c, k, S)
+    if armor is not None and armor.style == "mail":
+        for k in range(1, 6):
+            y = -tl * S * k / 6
+            pygame.draw.line(surf, shade(body_c, 0.8), Tt(-4.4 * S, y), Tt(4.4 * S, y), max(1, int(S * 0.5)))
+        for k in range(-2, 3):
+            pygame.draw.line(surf, shade(body_c, 1.12), Tt(k * 1.8 * S, -tl * S * 0.9), Tt(k * 1.8 * S, -tl * S * 0.1),
+                             max(1, int(S * 0.3)))
+    if armor is not None and armor.style == "plate":
+        shaper([(-3.6 * S, -tl * 0.88 * S), (3.8 * S, -tl * 0.88 * S), (4.4 * S, -tl * 0.4 * S),
+                           (3.4 * S, -tl * 0.12 * S), (-3.8 * S, -tl * 0.15 * S)], shade(body_c, 1.08), 0.6)
+        pygame.draw.line(surf, paint.warm(body_c, 0.5), Tt(1.6 * S, -tl * 0.8 * S), Tt(2.6 * S, -tl * 0.35 * S),
+                         max(1, int(S * 0.7)))
+    tab = L.get("tabard")
+    if tab:
+        c1, c2 = tab
+        tb = [(-3.4 * S, -tl * 0.95 * S), (3.4 * S, -tl * 0.95 * S), (4.0 * S, hem * 0.9 * S),
+              (-4.2 * S, hem * 0.9 * S)]
+        shaper(tb, c1, 0.7)
+        poly(surf, Tt, [(0, -tl * 0.74 * S), (1.7 * S, -tl * 0.52 * S), (0, -tl * 0.3 * S),
+                        (-1.7 * S, -tl * 0.52 * S)], c2)
+    elif not plated:
+        # cloth folds: soft creases falling from the belt and across the chest
+        fc = paint.warm(body_c, -0.28)
+        w_ = max(1, int(S * 0.6))
+        for fx_ in (-2.2, 0.8, 3.4):
+            pygame.draw.line(surf, fc, Tt(fx_ * S, 1.0 * S), Tt((fx_ + 0.6) * S, (hem - 0.8) * S), w_)
+        pygame.draw.line(surf, fc, Tt(-3.4 * S, -tl * 0.62 * S), Tt(1.0 * S, -tl * 0.5 * S), w_)
+        # the neckline
+        pygame.draw.line(surf, shade(body_c, 0.6), Tt(0.4 * S, -tl * S), Tt(2.6 * S, -tl * 0.82 * S),
+                         max(1, int(S * 0.7)))
+    trim = L.get("trim")
+    if trim:
+        pygame.draw.line(surf, trim, Tt(-hw * S, hem * S), Tt(hw * S, hem * S), max(1, int(S)))
+        pygame.draw.line(surf, trim, Tt(-4.4 * S, -tl * S), Tt(3.0 * S, -tl * S), max(1, int(S)))
+    belt = L.get("belt", (70, 50, 30))
+    pygame.draw.line(surf, belt, Tt(-4.9 * S, -0.5 * S), Tt(4.7 * S, -0.5 * S), max(2, int(S * 1.2)))
+    bk = Tt(3.0 * S, -0.5 * S)
+    pygame.draw.rect(surf, (186, 160, 90), (bk[0] - S * 0.8, bk[1] - S * 0.8, S * 1.6, S * 1.6),
+                     max(1, int(S * 0.4)))
+    if L.get("purse", True) and not plated:
+        pp = Tt(-2.0 * S, 1.6 * S)
+        pygame.draw.ellipse(surf, shade(belt, 1.25), (pp[0] - S * 1.2, pp[1] - S, S * 2.4, S * 2.8))
+    if inj.get("torso", 0) >= 1:
+        pygame.draw.circle(surf, (130, 20, 20), Tt(1.0 * S, -tl * 0.45 * S), max(1, int((1 + inj["torso"]) * S * 0.8)))
+
+
+def held_weapon(surf, h, J, p, wd, S, f, sx, sy, ss, rd, tint):
+    """The weapon in the front hand, with the swoosh trail of a swing."""
+    hfp = J["hf"]
     if wd is not None and wd.key != "fists" and p.weapon_mode == "hand" and not tint:
         if p.wa is None or rd is not None:
             ang = math.atan2(J["hf"][1] - J["ef"][1], (J["hf"][0] - J["ef"][0]) * f)
@@ -623,14 +652,6 @@ def _draw_humanoid(surf, h, sx, sy, scale, tint, ss, osx, osy):
                        to_s(((a[0] + a[2]) / 2, (a[1] + a[3]) / 2))]
                 pygame.draw.polygon(surf, c, pts)
         _draw_weapon(surf, wd, hfp, tip, f, S, draw=p.draw, h=h, hand2=J["hb"])
-    # the hand over the grip
-    pygame.draw.circle(surf, shade(skin, 0.5), hfp, 1.9 * S)
-    pygame.draw.circle(surf, skin, hfp, 1.9 * S - _EDGE[0])
-    pygame.draw.circle(surf, paint.warm(skin, 0.15), (hfp[0] + LIGHT[0] * S * 0.6, hfp[1] + LIGHT[1] * S * 0.6), S * 0.8)
-    if p.shield_up and h.shield is not None and not tint:
-        _draw_shield(surf, h, (hfp[0] + 2 * f * S, hfp[1] - 3 * S), f, S, raised=True)
-    if h.hurt_flash > 0:
-        pygame.draw.circle(surf, (255, 255, 255), head, HEAD_R * S + S, max(1, int(S)))
 
 
 def _w(n):
@@ -705,6 +726,13 @@ def _draw_head(surf, h, T, S, tint):
 
 
 def ppoly(surf, T, pts, color):
+    st = figure.current()
+    if st is not None:
+        # the new figure styles: cloth and steel get smooth, rounded outlines
+        from .quadruped import smooth_closed
+        W = [T(x, y) for x, y in smooth_closed(pts, 3)]
+        figure.shape(surf, W, color, st, _EDGE[0] / 0.55, 2.0 * _EDGE[0] / 0.55)
+        return
     painted(surf, T, pts, color, 0.5, _EDGE[0] / 0.55)
 
 

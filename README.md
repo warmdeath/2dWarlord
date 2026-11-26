@@ -72,6 +72,7 @@ Python 3.10+. Classic `pygame` 2.x also works. F11 toggles fullscreen, F3 shows 
 | I · B · M · N · R | the Rucksack & crafting · blueprints · world map · Wörterbuch (Q = quiz) · Ständeordnung |
 | X · Tab · Z | formation orders · select formation · commander's zoomed-out view |
 | F5 / F9 · Esc · H | save / load · pause · help |
+| F7 | try the character looks: classic, storybook, ink, oil |
 
 ## The polygon world (round 3)
 
